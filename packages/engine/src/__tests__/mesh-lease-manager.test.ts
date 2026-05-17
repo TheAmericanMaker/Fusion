@@ -248,6 +248,74 @@ describe("MeshLeaseManager", () => {
     expect(recordRunAuditEvent.mock.calls.some((call) => call[0].mutationType === "task:auto-recover-lease-foreign-owner")).toBe(true);
   });
 
+  it("treats central not_found as already-healed and still clears local lease", async () => {
+    const currentTask = task({ column: "in-progress" });
+    const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
+    const centralClaimStore: CentralClaimStore = {
+      tryClaimTask: vi.fn() as any,
+      renewTaskClaim: vi.fn() as any,
+      getTaskClaim: vi.fn().mockReturnValue(null),
+      releaseTaskClaim: vi.fn().mockReturnValue({ ok: false, reason: "not_found", current: null }),
+    };
+    const taskStore = {
+      getTask: vi.fn().mockResolvedValue(currentTask),
+      updateTask: vi.fn().mockResolvedValue(currentTask),
+      moveTask: vi.fn().mockResolvedValue(currentTask),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      recordRunAuditEvent,
+    } as unknown as TaskStore;
+
+    const manager = new MeshLeaseManager({ taskStore, centralClaimStore, projectId: "project-1" });
+    const ok = await manager.recoverAbandonedLease("FN-1", "stale-heartbeat");
+    expect(ok).toBe(true);
+    expect(taskStore.updateTask).toHaveBeenCalled();
+    expect(recordRunAuditEvent.mock.calls.some((call) => call[0].mutationType === "task:auto-recover-lease-already-healed")).toBe(true);
+  });
+
+  it("returns false when central claim release remains unavailable after retry", async () => {
+    const currentTask = task();
+    const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
+    const centralClaimStore: CentralClaimStore = {
+      tryClaimTask: vi.fn() as any,
+      renewTaskClaim: vi.fn() as any,
+      getTaskClaim: vi.fn().mockReturnValue(null),
+      releaseTaskClaim: vi.fn().mockImplementation(() => {
+        throw new Error("busy");
+      }),
+    };
+    const taskStore = {
+      getTask: vi.fn().mockResolvedValue(currentTask),
+      updateTask: vi.fn().mockResolvedValue(currentTask),
+      moveTask: vi.fn().mockResolvedValue(currentTask),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      recordRunAuditEvent,
+    } as unknown as TaskStore;
+
+    const manager = new MeshLeaseManager({ taskStore, centralClaimStore, projectId: "project-1" });
+    const ok = await manager.recoverAbandonedLease("FN-1", "stale-heartbeat");
+    expect(ok).toBe(false);
+    expect(taskStore.updateTask).not.toHaveBeenCalled();
+    expect(recordRunAuditEvent.mock.calls.some((call) => call[0].mutationType === "task:auto-recover-lease-central-unavailable")).toBe(true);
+  });
+
+  it("single-node fallback keeps recovery local-only", async () => {
+    const currentTask = task({ currentStep: 2, steps: [{ status: "done" } as any] });
+    const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
+    const taskStore = {
+      getTask: vi.fn().mockResolvedValue(currentTask),
+      updateTask: vi.fn().mockResolvedValue(currentTask),
+      moveTask: vi.fn().mockResolvedValue(currentTask),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      recordRunAuditEvent,
+    } as unknown as TaskStore;
+
+    const manager = new MeshLeaseManager({ taskStore });
+    const ok = await manager.recoverAbandonedLease("FN-1", "stale-heartbeat", { preserveProgress: true });
+    expect(ok).toBe(true);
+    expect(taskStore.moveTask).toHaveBeenCalledWith("FN-1", "todo", { preserveProgress: true });
+    expect(recordRunAuditEvent.mock.calls.some((call) => String(call[0].mutationType).includes("task:auto-recover-lease-"))).toBe(false);
+  });
+
   it("reconcileLeaseRow clears local owner when central claim is already gone", async () => {
     const currentTask = task();
     const centralClaimStore: CentralClaimStore = {
