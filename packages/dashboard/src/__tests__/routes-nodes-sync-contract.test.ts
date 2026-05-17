@@ -163,7 +163,7 @@ const ENDPOINTS: readonly SyncEndpoint[] = [
     path: "/api/nodes/node-remote-001/settings/sync-status",
     direction: "outbound",
     requiresNodeApiKey: true,
-    exceptions: ["missing-node-apiKey-returns-200-degraded"], // Why: endpoint intentionally degrades to remoteReachable=false instead of throwing.
+    exceptions: ["missing-node-apiKey-returns-200-degraded", "missing-node-url-returns-200-degraded"], // Why: endpoint intentionally degrades to remoteReachable=false instead of throwing.
   },
   { name: "auth-sync", method: "POST", path: "/api/nodes/node-remote-001/auth/sync", direction: "outbound", requiresNodeApiKey: true, sampleBody: () => ({}) },
   { name: "sync-receive", method: "POST", path: "/api/settings/sync-receive", direction: "inbound", requiresBearer: true, sampleBody: () => ({ sourceNodeId: "node-1", exportedAt: "2026-04-14T10:00:00.000Z" }) },
@@ -235,6 +235,50 @@ describe("Node settings/auth sync contract matrix", () => {
     },
   );
 
+  it.each(ENDPOINTS.filter((endpoint) => endpoint.direction === "outbound" && endpoint.requiresNodeApiKey))(
+    "enforces outbound missing remote URL contract ($name) [url=null]",
+    async (endpoint) => {
+      if (endpoint.exceptions?.includes("missing-node-url-returns-200-degraded")) {
+        return;
+      }
+
+      const remoteNode = createMockRemoteNode({ url: null });
+      mockGetNode.mockResolvedValue(remoteNode);
+
+      const body = endpoint.sampleBody ? JSON.stringify(endpoint.sampleBody()) : undefined;
+      const headers = endpoint.method === "POST" ? { "content-type": "application/json" } : undefined;
+      const res = endpoint.method === "GET"
+        ? await get(app, endpoint.path)
+        : await request(app, endpoint.method, endpoint.path, body, headers);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("Node has no URL configured");
+      expect(mockFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(ENDPOINTS.filter((endpoint) => endpoint.direction === "outbound" && endpoint.requiresNodeApiKey))(
+    "enforces outbound missing remote URL contract ($name) [url=empty]",
+    async (endpoint) => {
+      if (endpoint.exceptions?.includes("missing-node-url-returns-200-degraded")) {
+        return;
+      }
+
+      const remoteNode = createMockRemoteNode({ url: "" });
+      mockGetNode.mockResolvedValue(remoteNode);
+
+      const body = endpoint.sampleBody ? JSON.stringify(endpoint.sampleBody()) : undefined;
+      const headers = endpoint.method === "POST" ? { "content-type": "application/json" } : undefined;
+      const res = endpoint.method === "GET"
+        ? await get(app, endpoint.path)
+        : await request(app, endpoint.method, endpoint.path, body, headers);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("Node has no URL configured");
+      expect(mockFetch).not.toHaveBeenCalled();
+    },
+  );
+
   it("sync-status returns remoteReachable=false for missing apiKey", async () => {
     const remoteNode = createMockRemoteNode({ apiKey: undefined });
     mockGetNode.mockResolvedValue(remoteNode);
@@ -244,6 +288,29 @@ describe("Node settings/auth sync contract matrix", () => {
     expect(res.status).toBe(200);
     expect(res.body.remoteReachable).toBe(false);
     expect(res.body.diff).toEqual({ global: [], project: [] });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([null, ""])("sync-status returns remoteReachable=false for missing URL [url=%p]", async (urlValue) => {
+    const remoteNode = createMockRemoteNode({ url: urlValue });
+    mockGetNode.mockResolvedValue(remoteNode);
+
+    const res = await get(app, "/api/nodes/node-remote-001/settings/sync-status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.remoteReachable).toBe(false);
+    expect(res.body.diff).toEqual({ global: [], project: [] });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("missing URL takes precedence over missing apiKey for outbound sync", async () => {
+    const remoteNode = createMockRemoteNode({ url: null, apiKey: undefined });
+    mockGetNode.mockResolvedValue(remoteNode);
+
+    const res = await get(app, "/api/nodes/node-remote-001/settings");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Node has no URL configured");
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
