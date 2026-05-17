@@ -21,7 +21,7 @@ describeIfGit("reliability interactions: self-defeating dep reconciliation", () 
     });
     fixtures.push(fx);
 
-    await fx.store.updateTask(fx.task.id, { title: "Finalize FN-100: close loop" });
+    fx.store.getDatabase().prepare("UPDATE tasks SET title = ? WHERE id = ?").run("Finalize FN-100: close loop", fx.task.id);
 
     const recovered = await fx.manager.reconcileSelfDefeatingDependencies();
     expect(recovered).toBe(1);
@@ -76,7 +76,7 @@ describeIfGit("reliability interactions: self-defeating dep reconciliation", () 
     });
     fixtures.push(fx);
 
-    await fx.store.updateTask(fx.task.id, { title: "Finalize FN-100" });
+    fx.store.getDatabase().prepare("UPDATE tasks SET title = ? WHERE id = ?").run("Finalize FN-100", fx.task.id);
 
     const recovered = await fx.manager.reconcileSelfDefeatingDependencies();
     expect(recovered).toBe(0);

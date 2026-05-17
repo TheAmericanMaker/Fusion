@@ -152,6 +152,12 @@ export type { StalledReviewSignal } from "./stalled-review-detector.js";
 export {
   detectTaskIdIntegrityAnomalies,
 } from "./task-id-integrity.js";
+export {
+  TASK_ID_TOKEN_RE,
+  extractTaskIdTokens,
+  hasTitleIdDrift,
+  normalizeTitleForTaskId,
+} from "./task-title-id-drift.js";
 export type {
   TaskIdIntegrityAnomaly,
   TaskIdIntegrityAnomalyKind,

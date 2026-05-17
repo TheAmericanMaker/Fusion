@@ -771,6 +771,28 @@ describe("TaskStore", () => {
   });
 
 
+  describe("title-id drift normalization", () => {
+    it("normalizes foreign fn id and appends log entry", async () => {
+      const task = await store.createTask({ description: "x" });
+      const updated = await store.updateTask(task.id, { title: "Something FN-9999 something" });
+      expect(updated.title).toBe("Something something");
+      expect(updated.log.some((entry) => entry.action.includes("Title normalized"))).toBe(true);
+    });
+
+    it("does not normalize when row id matches token", async () => {
+      const task = await store.createTask({ description: "x" });
+      const updated = await store.updateTask(task.id, { title: `Something ${task.id} something` });
+      expect(updated.title).toBe(`Something ${task.id} something`);
+      expect(updated.log.some((entry) => entry.action.includes("Title normalized"))).toBe(false);
+    });
+
+    it("clears title when only foreign token is provided", async () => {
+      const task = await store.createTask({ description: "x" });
+      const updated = await store.updateTask(task.id, { title: "FN-9999" });
+      expect(updated.title).toBeUndefined();
+    });
+  });
+
   describe("noCommitsExpected persistence", () => {
     it("round-trips noCommitsExpected=true through create and reload", async () => {
       const created = await store.createTask({

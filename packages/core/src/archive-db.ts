@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ArchivedTaskEntry } from "./types.js";
 import { probeFts5 } from "./db.js";
+import { hasTitleIdDrift, normalizeTitleForTaskId } from "./task-title-id-drift.js";
 
 const BASE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS archived_tasks (
@@ -81,6 +82,7 @@ export class ArchiveDatabase {
       this.db.exec(FTS5_SCHEMA_SQL);
     }
     this.addColumnIfMissing("archived_tasks", "prompt", "TEXT");
+    this.normalizeDriftedTitlesOnce();
   }
 
   upsert(entry: ArchivedTaskEntry): void {
@@ -206,6 +208,38 @@ export class ArchiveDatabase {
       LIMIT ?
     `).all(...params) as Array<{ taskJson: string }>;
     return rows.map((row) => JSON.parse(row.taskJson) as ArchivedTaskEntry);
+  }
+
+  private normalizeDriftedTitlesOnce(): void {
+    const rows = this.db.prepare(`
+      SELECT id, title, taskJson
+      FROM archived_tasks
+      WHERE title LIKE '%FN-%'
+    `).all() as Array<{ id: string; title: string | null; taskJson: string }>;
+
+    const updateStmt = this.db.prepare("UPDATE archived_tasks SET title = ?, taskJson = ? WHERE id = ?");
+    let normalizedCount = 0;
+
+    for (const row of rows) {
+      if (!row.title || !hasTitleIdDrift(row.title, row.id)) {
+        continue;
+      }
+      const normalized = normalizeTitleForTaskId(row.title, row.id);
+      if (!normalized.changed) {
+        continue;
+      }
+      let parsed: ArchivedTaskEntry;
+      try {
+        parsed = JSON.parse(row.taskJson) as ArchivedTaskEntry;
+      } catch {
+        continue;
+      }
+      parsed.title = normalized.title ?? undefined;
+      updateStmt.run(normalized.title, JSON.stringify(parsed), row.id);
+      normalizedCount += 1;
+    }
+
+    console.log(`[title-id-drift] archive-db normalized ${normalizedCount} archived titles`);
   }
 
   close(): void {

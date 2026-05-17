@@ -109,6 +109,33 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("schema migration 84 title-id drift", () => {
+    it("normalizes drifted active titles and is stable on rerun", async () => {
+      await harness.reopenDiskBackedStore();
+      const store = harness.store();
+      const drifted = await store.createTask({ title: "temporary", description: "drift" });
+      const own = await store.createTask({ title: "temporary", description: "own" });
+      const untitled = await store.createTask({ description: "none" });
+
+      const db = store.getDatabase();
+      db.prepare("UPDATE tasks SET title = ? WHERE id = ?").run("Finalize FN-9999: mark steps done", drifted.id);
+      db.prepare("UPDATE tasks SET title = ? WHERE id = ?").run(`Keep ${own.id} title`, own.id);
+      db.prepare("UPDATE tasks SET title = NULL WHERE id = ?").run(untitled.id);
+      db.prepare("UPDATE __meta SET value = '83' WHERE key = 'schemaVersion'").run();
+
+      await harness.reopenDiskBackedStore();
+
+      expect((await harness.store().getTask(drifted.id)).title).toBe("Finalize mark steps done");
+      expect((await harness.store().getTask(own.id)).title).toBe(`Keep ${own.id} title`);
+      expect((await harness.store().getTask(untitled.id)).title).toBeUndefined();
+
+      const firstTitle = (await harness.store().getTask(drifted.id)).title;
+      harness.store().getDatabase().prepare("UPDATE __meta SET value = '83' WHERE key = 'schemaVersion'").run();
+      await harness.reopenDiskBackedStore();
+      expect((await harness.store().getTask(drifted.id)).title).toBe(firstTitle);
+    });
+  });
+
   describe("FTS5 corruption recovery during create inserts", () => {
     it("rebuilds FTS5 and retries once when an insert fails with an FTS corruption error", async () => {
       const db = harness.store().getDatabase();

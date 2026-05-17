@@ -581,7 +581,7 @@ describe("TaskStore", () => {
 
       const refined = await store.refineTask(task.id, "Feedback");
 
-      expect(refined.title).toBe(`Refinement: ${task.id}`);
+      expect(refined.title).toBe("Refinement");
     });
 
     it("PROMPT.md heading matches the refinement title", async () => {

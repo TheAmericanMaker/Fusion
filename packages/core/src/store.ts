@@ -34,6 +34,7 @@ import { runCommandAsync } from "./run-command.js";
 import { createLogger } from "./logger.js";
 import { validateNodeOverrideChange } from "./node-override-guard.js";
 import { sanitizeTitle } from "./ai-summarize.js";
+import { extractTaskIdTokens, normalizeTitleForTaskId } from "./task-title-id-drift.js";
 import { getErrorMessage } from "./error-message.js";
 import { getTaskCreatedHook } from "./task-creation-hooks.js";
 import { assertProjectRootDir } from "./project-root-guard.js";
@@ -1715,6 +1716,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * Upsert a task to the database. Update paths intentionally retain ON CONFLICT
    * semantics; create paths must use insertTask() instead.
+   * FN-4898: this low-level persistence path intentionally does not normalize
+   * titles because replication/restore flows may carry authoritative bytes.
    */
   private upsertTask(task: Task): void {
     const values = this.getTaskPersistValues(task);
@@ -2992,11 +2995,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       Promise.resolve().then(async () => {
         try {
           const generatedTitle = await options.onSummarize!(input.description);
-          const normalizedTitle = sanitizeTitle(generatedTitle);
-          if (normalizedTitle) {
+          const sanitizedTitle = sanitizeTitle(generatedTitle);
+          if (sanitizedTitle) {
             const currentTask = this.readTaskFromDb(id);
             if (currentTask && !currentTask.title) {
-              await this.updateTask(id, { title: normalizedTitle });
+              const normalizedTitle = normalizeTitleForTaskId(sanitizedTitle, id);
+              if (normalizedTitle.title) {
+                await this.updateTask(id, { title: normalizedTitle.title });
+              }
             }
           }
         } catch (err) {
@@ -3116,6 +3122,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // Intentionally does not invoke the post-create hook. Replicated tasks mirror
     // state from an origin node; rerunning side effects here (e.g. GitHub issue
     // creation) would duplicate external artifacts.
+    // FN-4898: replicated creates route via _createTaskInternal so drift normalization
+    // is applied exactly once (same behavior as user-originated writes).
     const existing = this.readTaskFromDb(payload.taskId);
     if (existing) {
       const existingDetail = await this.getTask(payload.taskId);
@@ -3154,10 +3162,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     },
   ): Promise<Task> {
     const now = options?.createdAt ?? new Date().toISOString();
+    const normalizedTitle = normalizeTitleForTaskId(title, id);
     const task: Task = {
       id,
       lineageId: input.lineageId ?? generateTaskLineageId(),
-      title,
+      title: normalizedTitle.title ?? undefined,
       description: input.description,
       priority: normalizeTaskPriority(input.priority),
       tokenUsage: input.tokenUsage,
@@ -3202,6 +3211,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       createdAt: now,
       updatedAt: options?.updatedAt ?? now,
     };
+
+    if (normalizedTitle.changed) {
+      task.log.push({
+        timestamp: now,
+        action: "Title normalized: stripped legacy task-id reference",
+      });
+      const removed = extractTaskIdTokens(title ?? "").filter((token) => token !== id.toUpperCase());
+      storeLog.log(`[title-id-drift] normalized title for ${id}: removed=[${removed.join(",")}]`);
+    }
 
     this.assertTaskIdAvailable(id);
 
@@ -3256,10 +3274,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     return this.createTaskWithDistributedReservation({ description: sourceTask.description }, {
       createTaskWithId: async (newId) => {
+        const normalizedTitle = normalizeTitleForTaskId(sourceTask.title, newId);
+        if (normalizedTitle.changed) {
+          const removed = extractTaskIdTokens(sourceTask.title ?? "").filter((token) => token !== newId.toUpperCase());
+          storeLog.log(`[title-id-drift] normalized title for ${newId}: removed=[${removed.join(",")}]`);
+        }
         const newTask: Task = {
           id: newId,
           lineageId: generateTaskLineageId(),
-          title: sourceTask.title,
+          title: normalizedTitle.title ?? undefined,
           description: `${sourceTask.description}\n\n(Duplicated from ${id})`,
           priority: normalizeTaskPriority(sourceTask.priority),
           column: "triage",
@@ -3332,10 +3355,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     return this.createTaskWithDistributedReservation({ description: feedback.trim() }, {
       createTaskWithId: async (newId) => {
+        const normalizedTitle = normalizeTitleForTaskId(`Refinement: ${sourceLabel}`, newId);
+        if (normalizedTitle.changed) {
+          const removed = extractTaskIdTokens(`Refinement: ${sourceLabel}`).filter((token) => token !== newId.toUpperCase());
+          storeLog.log(`[title-id-drift] normalized title for ${newId}: removed=[${removed.join(",")}]`);
+        }
         const newTask: Task = {
           id: newId,
           lineageId: generateTaskLineageId(),
-          title: `Refinement: ${sourceLabel}`,
+          title: normalizedTitle.title ?? "Refinement",
           description: `${feedback.trim()}\n\nRefines: ${id}`,
           priority: normalizeTaskPriority(sourceTask.priority),
           column: "triage",
@@ -4389,7 +4417,22 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.log = [];
       }
 
-      if (updates.title !== undefined) task.title = updates.title;
+      let titleNormalized = false;
+      if (updates.title !== undefined) {
+        task.title = updates.title;
+        const normalizedTitle = normalizeTitleForTaskId(task.title, id);
+        if (normalizedTitle.changed) {
+          titleNormalized = true;
+          const removed = extractTaskIdTokens(task.title ?? "").filter((token) => token !== id.toUpperCase());
+          task.title = normalizedTitle.title ?? undefined;
+          task.log.push({
+            timestamp: new Date().toISOString(),
+            action: "Title normalized: stripped legacy task-id reference",
+            ...(runContext ? { runContext } : {}),
+          });
+          storeLog.log(`[title-id-drift] normalized title for ${id}: removed=[${removed.join(",")}]`);
+        }
+      }
       if (updates.description !== undefined) task.description = updates.description;
       if (updates.priority === null) {
         task.priority = normalizeTaskPriority(undefined);
@@ -4873,7 +4916,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           domain: "database",
           mutationType: "task:update",
           target: task.id,
-          metadata: { updatedFields: Object.keys(updates).filter((k) => (updates as Record<string, unknown>)[k] !== undefined) },
+          metadata: {
+            updatedFields: Object.keys(updates).filter((k) => (updates as Record<string, unknown>)[k] !== undefined),
+            ...(titleNormalized ? { titleNormalized: true } : {}),
+          },
         });
       } else {
         await this.atomicWriteTaskJson(dir, task);

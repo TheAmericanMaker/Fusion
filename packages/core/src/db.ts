@@ -16,6 +16,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { DEFAULT_PROJECT_SETTINGS } from "./types.js";
 import type { PluginOnSchemaInit } from "./plugin-types.js";
 import type { SteeringComment, TaskComment } from "./types.js";
+import { hasTitleIdDrift, normalizeTitleForTaskId } from "./task-title-id-drift.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 83;
+const SCHEMA_VERSION = 84;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -3366,6 +3367,36 @@ export class Database {
           `);
           this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idxSecretsKey ON secrets(key)");
         }
+      });
+    }
+
+    if (version < 84) {
+      this.applyMigration(84, () => {
+        if (!this.hasColumn("tasks", "title")) {
+          console.log("[title-id-drift] db.ts migration normalized 0 active titles");
+          return;
+        }
+
+        const rows = this.db.prepare("SELECT id, title FROM tasks WHERE title IS NOT NULL").all() as Array<{
+          id: string;
+          title: string;
+        }>;
+        const updateStmt = this.db.prepare("UPDATE tasks SET title = ? WHERE id = ?");
+        let normalizedCount = 0;
+
+        for (const row of rows) {
+          if (!hasTitleIdDrift(row.title, row.id)) {
+            continue;
+          }
+          const normalized = normalizeTitleForTaskId(row.title, row.id);
+          if (!normalized.changed) {
+            continue;
+          }
+          updateStmt.run(normalized.title, row.id);
+          normalizedCount += 1;
+        }
+
+        console.log(`[title-id-drift] db.ts migration normalized ${normalizedCount} active titles`);
       });
     }
 

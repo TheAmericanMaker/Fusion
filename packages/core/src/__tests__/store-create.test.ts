@@ -198,10 +198,12 @@ describe("TaskStore", () => {
     });
 
     it("sets duplicate and refine provenance parent links", async () => {
-      const source = await store.createTask({ description: "Original" });
+      const source = await store.createTask({ title: "Fix FN-123 bug", description: "Original" });
       const duplicated = await store.duplicateTask(source.id);
       expect(duplicated.sourceType).toBe("task_duplicate");
       expect(duplicated.sourceParentTaskId).toBe(source.id);
+      expect(duplicated.title).toBe("Fix bug");
+      expect(duplicated.description).toContain(`(Duplicated from ${source.id})`);
 
       await store.moveTask(source.id, "todo");
       await store.moveTask(source.id, "in-progress");
@@ -210,6 +212,15 @@ describe("TaskStore", () => {
       const refined = await store.refineTask(source.id, "Needs polish");
       expect(refined.sourceType).toBe("task_refine");
       expect(refined.sourceParentTaskId).toBe(source.id);
+      expect(refined.title).toBe("Refinement: Fix bug");
+    });
+
+    it("FN-4898: prevents title/ID drift on duplicateTask", async () => {
+      const source = await store.createTask({ title: "Finalize FN-4847: mark steps done", description: "x" });
+      const duplicated = await store.duplicateTask(source.id);
+      expect(duplicated.title).toBe("Finalize mark steps done");
+      expect(duplicated.sourceParentTaskId).toBe(source.id);
+      expect(duplicated.description).toContain(`(Duplicated from ${source.id})`);
     });
 
     it("preserves provenance on updateTask", async () => {
