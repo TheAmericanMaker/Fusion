@@ -804,6 +804,10 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       expect(await screen.findByText(/Could not load project list/i)).toBeInTheDocument();
+      const control = screen.getByRole("combobox", { name: "Global default tracking repo" });
+      expect(screen.getByRole("option", { name: "Custom…" })).toBeInTheDocument();
+
+      await userEvent.selectOptions(control, "__custom__");
       expect(screen.getByPlaceholderText("owner/repo")).toBeInTheDocument();
     });
   });
