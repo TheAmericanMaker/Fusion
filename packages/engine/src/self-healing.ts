@@ -2582,7 +2582,7 @@ export class SelfHealingManager {
     if (window.pendingVerification && this.maintenanceTickCounter > window.pendingVerification.tick) {
       const noProgress = window.transitionsOutOfInProgressInWindow === 0;
       if (noProgress) {
-        const ntfyAllowed = window.lastNtfyAt === null || now - window.lastNtfyAt >= 15 * 60_000;
+        const ntfyAllowed = window.lastNtfyAt === null || now - window.lastNtfyAt >= BOARD_STALL_NOTIFICATION_COOLDOWN_MS;
         let ntfyDispatched = false;
         if (ntfyAllowed) {
           try {
@@ -2594,7 +2594,6 @@ export class SelfHealingManager {
               window.lastNtfyAt = now;
               ntfyDispatched = true;
             } else {
-              const settings = await this.store.getSettings();
               const enabled = Boolean(settings.ntfyEnabled && settings.ntfyTopic);
               const events = resolveNtfyEvents(settings.ntfyEvents);
               if (enabled && isNtfyEventEnabled(events, "board-stall-unrecovered")) {
