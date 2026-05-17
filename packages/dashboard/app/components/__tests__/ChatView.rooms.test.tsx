@@ -320,11 +320,27 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     await userEvent.type(textarea, "Hello room{enter}");
 
     await waitFor(() => {
-      expect(sendRoomMessage).toHaveBeenCalledWith("Hello room");
+      expect(sendRoomMessage).toHaveBeenCalledWith("Hello room", { files: [] });
     });
     await waitFor(() => {
       expect((textarea as HTMLTextAreaElement).value).toBe("");
     });
+  });
+
+  it("passes attachment file list shape to room sends", async () => {
+    const addToast = vi.fn();
+    const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
+    setup({}, { sendRoomMessage, activeRoom: roomA });
+
+    render(<ChatView projectId="proj-123" addToast={addToast} experimentalFeatures={{ chatRooms: true }} />);
+
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    await userEvent.type(textarea, "Room upload{enter}");
+
+    await waitFor(() => {
+      expect(sendRoomMessage).toHaveBeenCalledWith("Room upload", { files: [] });
+    });
+    expect(addToast).not.toHaveBeenCalledWith(expect.stringMatching(/attach/i), "warning");
   });
 
   it("keeps room composer text and toasts once when room send fails", async () => {
@@ -342,7 +358,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     await userEvent.type(textarea, "Will retry{enter}");
 
     await waitFor(() => {
-      expect(sendRoomMessage).toHaveBeenCalledWith("Will retry");
+      expect(sendRoomMessage).toHaveBeenCalledWith("Will retry", { files: [] });
     });
     expect(textarea.value).toBe("");
 
@@ -369,7 +385,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     await userEvent.type(textarea, "Optimistic clear{enter}");
 
     await waitFor(() => {
-      expect(sendRoomMessage).toHaveBeenCalledWith("Optimistic clear");
+      expect(sendRoomMessage).toHaveBeenCalledWith("Optimistic clear", { files: [] });
     });
     expect(textarea.value).toBe("");
 
@@ -423,7 +439,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     await userEvent.type(textarea, "/clear now{enter}");
 
     await waitFor(() => {
-      expect(sendRoomMessage).toHaveBeenCalledWith("/clear now");
+      expect(sendRoomMessage).toHaveBeenCalledWith("/clear now", { files: [] });
     });
     expect(clearRoom).not.toHaveBeenCalled();
   });

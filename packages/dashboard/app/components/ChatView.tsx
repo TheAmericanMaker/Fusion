@@ -745,8 +745,11 @@ const ChatMessageItem = memo(function ChatMessageItem({
 
   const renderedAttachments = useMemo<ReactNode>(() => {
     const attachments = message.attachments;
-    if (!attachments || attachments.length === 0 || !activeSessionId) return null;
-    const attachmentUrlBase = `/api/chat/sessions/${encodeURIComponent(activeSessionId)}/attachments/`;
+    if (!attachments || attachments.length === 0) return null;
+    const attachmentUrlBase = message.roomId
+      ? `/api/chat/rooms/${encodeURIComponent(message.roomId)}/attachments/`
+      : (activeSessionId ? `/api/chat/sessions/${encodeURIComponent(activeSessionId)}/attachments/` : null);
+    if (!attachmentUrlBase) return null;
     return (
       <div className="chat-message-attachments">
         {attachments.map((attachment) => {
@@ -787,8 +790,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
         })}
       </div>
     );
-  }, [message.attachments, activeSessionId]);
-
+  }, [message.attachments, message.roomId, activeSessionId]);
   const assistantBody = useMemo<ReactNode>(() => {
     if (!isAssistantMessage) return null;
     if (failureInfo) {
@@ -1692,7 +1694,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       clearComposerState();
 
       try {
-        await rooms.sendRoomMessage(trimmed);
+        await rooms.sendRoomMessage(trimmed, { files: pendingAttachments.map((attachment) => attachment.file) });
       } catch (error) {
         setMessageInput(previousInput);
         const message = error instanceof Error && error.message.trim()
@@ -1704,8 +1706,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     }
 
     handleSend();
-  }, [messageInput, chatRoomsEnabled, chatScope, rooms, rooms.clearRoom, clearComposerState, addToast, handleSend]);
-
+  }, [messageInput, pendingAttachments, chatRoomsEnabled, chatScope, rooms, rooms.clearRoom, clearComposerState, addToast, handleSend]);
   const handleSkillSelect = useCallback(
     (skill: DiscoveredSkill) => {
       setMessageInput((currentInput) => {
