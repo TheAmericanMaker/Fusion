@@ -30,6 +30,14 @@ export const SWR_CACHE_KEYS = {
 
 const DEFAULT_MAX_BYTES = 500_000;
 
+interface CacheEnvelope<T> {
+  savedAt: number;
+  data: T;
+}
+
+export const SWR_DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
+export const SWR_LONG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 function getLocalStorage(): Storage | null {
   if (typeof window !== "undefined" && window.localStorage) {
     return window.localStorage;
@@ -40,7 +48,7 @@ function getLocalStorage(): Storage | null {
   return null;
 }
 
-export function readCache<T>(key: string): T | null {
+export function readCache<T>(key: string, options?: { maxAgeMs?: number }): T | null {
   const storage = getLocalStorage();
   if (!storage) {
     return null;
@@ -52,7 +60,30 @@ export function readCache<T>(key: string): T | null {
       return null;
     }
 
-    return JSON.parse(raw) as T;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return parsed as T;
+    }
+
+    const hasEnvelopeMarkers = "savedAt" in parsed || "data" in parsed;
+    if (!hasEnvelopeMarkers) {
+      return parsed as T;
+    }
+
+    const envelope = parsed as Partial<CacheEnvelope<T>>;
+    if (typeof envelope.savedAt !== "number" || Number.isNaN(envelope.savedAt)) {
+      return envelope.data ?? null;
+    }
+
+    const maxAgeMs = options?.maxAgeMs;
+    if (typeof maxAgeMs === "number") {
+      const ageMs = Date.now() - envelope.savedAt;
+      if (ageMs > maxAgeMs) {
+        return null;
+      }
+    }
+
+    return envelope.data ?? null;
   } catch {
     return null;
   }
@@ -65,7 +96,10 @@ export function writeCache<T>(key: string, value: T, options?: { maxBytes?: numb
   }
 
   try {
-    const serialized = JSON.stringify(value);
+    const serialized = JSON.stringify({
+      savedAt: Date.now(),
+      data: value,
+    } satisfies CacheEnvelope<T>);
     const maxBytes = options?.maxBytes ?? DEFAULT_MAX_BYTES;
     if (new TextEncoder().encode(serialized).length > maxBytes) {
       return;
