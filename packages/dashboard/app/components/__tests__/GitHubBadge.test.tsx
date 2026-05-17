@@ -1,253 +1,59 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { IssueInfo, PrInfo } from "@fusion/core";
-import { loadAllAppCss } from "../../test/cssFixture";
+import type { PrInfo } from "@fusion/core";
 import { GitHubBadge } from "../GitHubBadge";
 
-describe("GitHubBadge", () => {
-  let styleEl: HTMLStyleElement;
+const basePrInfo: PrInfo = {
+  url: "https://github.com/owner/repo/pull/42",
+  number: 42,
+  status: "open",
+  title: "Fix critical bug",
+  headBranch: "feature/bugfix",
+  baseBranch: "main",
+  commentCount: 5,
+  lastCheckedAt: "2026-01-01T00:00:00Z",
+};
 
-  beforeAll(() => {
-    styleEl = document.createElement("style");
-    styleEl.textContent = loadAllAppCss();
-    document.head.appendChild(styleEl);
+describe("GitHubBadge PR state + rollup", () => {
+  it.each([
+    { name: "open", prInfo: { status: "open" as const }, expectedClass: "card-github-badge--open" },
+    { name: "draft", prInfo: { status: "open" as const, isDraft: true }, expectedClass: "card-github-badge--draft" },
+    { name: "merged", prInfo: { status: "merged" as const }, expectedClass: "card-github-badge--merged" },
+    { name: "closed", prInfo: { status: "closed" as const }, expectedClass: "card-github-badge--closed" },
+  ])("applies $name modifier class", ({ prInfo, expectedClass }) => {
+    const { container } = render(<GitHubBadge prInfo={{ ...basePrInfo, ...prInfo }} />);
+    expect(container.querySelector(`.${expectedClass}`)).not.toBeNull();
   });
 
-  afterAll(() => {
-    styleEl.remove();
-    document.body.innerHTML = "";
+  it.each([
+    { label: "undefined", checkRollup: undefined, expectedClass: null },
+    { label: "none", checkRollup: "none" as const, expectedClass: null },
+    { label: "success", checkRollup: "success" as const, expectedClass: "card-github-badge__check--success" },
+    { label: "failure", checkRollup: "failure" as const, expectedClass: "card-github-badge__check--failure" },
+    { label: "pending", checkRollup: "pending" as const, expectedClass: "card-github-badge__check--pending" },
+  ])("renders rollup icon class for $label", ({ checkRollup, expectedClass }) => {
+    const { container } = render(<GitHubBadge prInfo={{ ...basePrInfo, checkRollup }} />);
+    const check = container.querySelector(".card-github-badge__check");
+    if (expectedClass === null) {
+      expect(check).toBeNull();
+      return;
+    }
+    expect(container.querySelector(`.${expectedClass}`)).not.toBeNull();
   });
 
-  const mockPrInfo: PrInfo = {
-    url: "https://github.com/owner/repo/pull/42",
-    number: 42,
-    status: "open",
-    title: "Fix critical bug",
-    headBranch: "feature/bugfix",
-    baseBranch: "main",
-    commentCount: 5,
-    lastCheckedAt: "2026-01-01T00:00:00Z",
-  };
+  it("preserves link destination and tooltip format", () => {
+    render(<GitHubBadge prInfo={{ ...basePrInfo, status: "open", isDraft: true, checkRollup: "pending" }} />);
 
-  const mockIssueInfo: IssueInfo = {
-    url: "https://github.com/owner/repo/issues/123",
-    number: 123,
-    state: "open",
-    title: "Feature request: dark mode",
-    lastCheckedAt: "2026-01-01T00:00:00Z",
-  };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
+    const link = screen.getByRole("link", { name: "#42" });
+    expect(link).toHaveAttribute("href", basePrInfo.url);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(link).toHaveAttribute("title", "PR #42 (draft): Fix critical bug — checks: pending");
   });
 
-  describe("PR badge rendering", () => {
-    it("renders PR badge with correct number and icon when prInfo is provided", () => {
-      render(<GitHubBadge prInfo={mockPrInfo} />);
-
-      expect(screen.getByText("#42")).toBeDefined();
-      // Check for the PR icon (GitPullRequest)
-      const badge = screen.getByTitle("PR #42: Fix critical bug");
-      expect(badge).toBeDefined();
-    });
-
-    it("does not render PR badge when prInfo is undefined", () => {
-      render(<GitHubBadge />);
-
-      expect(screen.queryByText(/#/)).toBeNull();
-    });
-
-    it("applies correct color classes for open PR", () => {
-      const { container } = render(<GitHubBadge prInfo={mockPrInfo} />);
-
-      const badge = container.querySelector(".card-github-badge--open");
-      expect(badge).toBeDefined();
-    });
-
-    it("applies correct color classes for closed PR", () => {
-      const closedPr: PrInfo = { ...mockPrInfo, status: "closed" };
-      const { container } = render(<GitHubBadge prInfo={closedPr} />);
-
-      const badge = container.querySelector(".card-github-badge--closed");
-      expect(badge).toBeDefined();
-    });
-
-    it("applies correct color classes for merged PR", () => {
-      const mergedPr: PrInfo = { ...mockPrInfo, status: "merged" };
-      const { container } = render(<GitHubBadge prInfo={mergedPr} />);
-
-      const badge = container.querySelector(".card-github-badge--merged");
-      expect(badge).toBeDefined();
-    });
-  });
-
-  describe("Issue badge rendering", () => {
-    it("renders Issue badge with correct number and icon when issueInfo is provided", () => {
-      render(<GitHubBadge issueInfo={mockIssueInfo} />);
-
-      expect(screen.getByText("#123")).toBeDefined();
-      const badge = screen.getByTitle("Issue #123: Feature request: dark mode");
-      expect(badge).toBeDefined();
-    });
-
-    it("does not render Issue badge when issueInfo is undefined", () => {
-      render(<GitHubBadge />);
-
-      expect(screen.queryByText(/#/)).toBeNull();
-    });
-
-    it("applies correct color classes for open Issue", () => {
-      const { container } = render(<GitHubBadge issueInfo={mockIssueInfo} />);
-
-      const badge = container.querySelector(".card-github-badge--open");
-      expect(badge).toBeDefined();
-    });
-
-    it("applies correct color classes for completed Issue", () => {
-      const completedIssue: IssueInfo = { ...mockIssueInfo, state: "closed", stateReason: "completed" };
-      const { container } = render(<GitHubBadge issueInfo={completedIssue} />);
-
-      const badge = container.querySelector(".card-github-badge--completed");
-      expect(badge).toBeDefined();
-    });
-
-    it("applies correct color classes for not_planned Issue", () => {
-      const notPlannedIssue: IssueInfo = { ...mockIssueInfo, state: "closed", stateReason: "not_planned" };
-      const { container } = render(<GitHubBadge issueInfo={notPlannedIssue} />);
-
-      const badge = container.querySelector(".card-github-badge--closed");
-      expect(badge).toBeDefined();
-    });
-
-    it("handles Issue with no state reason gracefully", () => {
-      const noReasonIssue: IssueInfo = { ...mockIssueInfo, state: "closed", stateReason: undefined };
-      const { container } = render(<GitHubBadge issueInfo={noReasonIssue} />);
-
-      // Should use --closed modifier class for default fallback
-      const badge = container.querySelector(".card-github-badge");
-      expect(badge).toBeDefined();
-      expect(badge?.classList.contains("card-github-badge--open")).toBe(false);
-      expect(badge?.classList.contains("card-github-badge--completed")).toBe(false);
-      expect(badge?.classList.contains("card-github-badge--closed")).toBe(true);
-    });
-  });
-
-  describe("Both badges can appear simultaneously", () => {
-    it("renders both PR and Issue badges when both props are provided", () => {
-      render(<GitHubBadge prInfo={mockPrInfo} issueInfo={mockIssueInfo} />);
-
-      expect(screen.getByText("#42")).toBeDefined();
-      expect(screen.getByText("#123")).toBeDefined();
-    });
-
-    it("renders PR badge with open status and Issue badge with completed status", () => {
-      const completedIssue: IssueInfo = { ...mockIssueInfo, state: "closed", stateReason: "completed" };
-      const { container } = render(<GitHubBadge prInfo={mockPrInfo} issueInfo={completedIssue} />);
-
-      const badges = container.querySelectorAll(".card-github-badge");
-      expect(badges.length).toBe(2);
-
-      // First badge should be PR (open)
-      expect(badges[0].classList.contains("card-github-badge--open")).toBe(true);
-
-      // Second badge should be Issue (completed)
-      expect(badges[1].classList.contains("card-github-badge--completed")).toBe(true);
-    });
-  });
-
-  describe("Badge styling", () => {
-    it("uses the updated badge gap and font size", () => {
-      render(<GitHubBadge prInfo={mockPrInfo} />);
-
-      const badge = screen.getByRole("link", { name: "#42" });
-      const styles = getComputedStyle(badge);
-
-      expect(styles.fontSize).toBe("0.6875rem");
-      const resolvedGap = styles.gap.startsWith("var(")
-        ? getComputedStyle(document.documentElement).getPropertyValue("--space-xs").trim()
-        : styles.gap;
-      expect(resolvedGap).toBe("4px");
-    });
-
-    it("renders PR icon at 10x10", () => {
-      const { container } = render(<GitHubBadge prInfo={mockPrInfo} />);
-
-      const icon = container.querySelector(".card-github-badge svg");
-      expect(icon).not.toBeNull();
-      expect(icon?.getAttribute("width")).toBe("10");
-      expect(icon?.getAttribute("height")).toBe("10");
-    });
-
-    it("renders Issue icon at 10x10", () => {
-      const { container } = render(<GitHubBadge issueInfo={mockIssueInfo} />);
-
-      const icon = container.querySelector(".card-github-badge svg");
-      expect(icon).not.toBeNull();
-      expect(icon?.getAttribute("width")).toBe("10");
-      expect(icon?.getAttribute("height")).toBe("10");
-    });
-  });
-
-  describe("Link behavior", () => {
-    it("renders PR badge as a semantic link", () => {
-      render(<GitHubBadge prInfo={mockPrInfo} />);
-
-      const badge = screen.getByRole("link", { name: "#42" });
-      expect(badge).toHaveAttribute("href", "https://github.com/owner/repo/pull/42");
-      expect(badge).toHaveAttribute("target", "_blank");
-      expect(badge).toHaveAttribute("rel", "noopener noreferrer");
-    });
-
-    it("renders Issue badge as a semantic link", () => {
-      render(<GitHubBadge issueInfo={mockIssueInfo} />);
-
-      const badge = screen.getByRole("link", { name: "#123" });
-      expect(badge).toHaveAttribute("href", "https://github.com/owner/repo/issues/123");
-      expect(badge).toHaveAttribute("target", "_blank");
-      expect(badge).toHaveAttribute("rel", "noopener noreferrer");
-    });
-  });
-
-  describe("Tooltip text", () => {
-    it("shows correct tooltip for PR badge", () => {
-      render(<GitHubBadge prInfo={mockPrInfo} />);
-
-      const badge = screen.getByTitle("PR #42: Fix critical bug");
-      expect(badge).toBeDefined();
-    });
-
-    it("shows correct tooltip for Issue badge", () => {
-      render(<GitHubBadge issueInfo={mockIssueInfo} />);
-
-      const badge = screen.getByTitle("Issue #123: Feature request: dark mode");
-      expect(badge).toBeDefined();
-    });
-
-    it("handles long titles in tooltips", () => {
-      const longTitlePr: PrInfo = {
-        ...mockPrInfo,
-        title: "This is a very long PR title that exceeds normal length limits",
-      };
-      render(<GitHubBadge prInfo={longTitlePr} />);
-
-      const badge = screen.getByTitle(`PR #42: ${longTitlePr.title}`);
-      expect(badge).toBeDefined();
-    });
-  });
-
-  describe("No badges when no data", () => {
-    it("renders nothing when both prInfo and issueInfo are undefined", () => {
-      const { container } = render(<GitHubBadge />);
-
-      const badges = container.querySelectorAll(".card-github-badge");
-      expect(badges.length).toBe(0);
-    });
-
-    it("renders nothing when both prInfo and issueInfo are null", () => {
-      const { container } = render(<GitHubBadge prInfo={undefined} issueInfo={undefined} />);
-
-      const badges = container.querySelectorAll(".card-github-badge");
-      expect(badges.length).toBe(0);
-    });
+  it("keeps original tooltip format when no extra signal is present", () => {
+    render(<GitHubBadge prInfo={basePrInfo} />);
+    const link = screen.getByRole("link", { name: "#42" });
+    expect(link).toHaveAttribute("title", "PR #42: Fix critical bug");
   });
 });

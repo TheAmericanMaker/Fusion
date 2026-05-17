@@ -2042,6 +2042,24 @@ input[type="range"]:focus-visible {
   background: color-mix(in srgb, var(--in-progress) 20%, transparent);
   color: var(--in-progress);
 }
+.card-github-badge--draft {
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+  color: var(--text-muted);
+}
+.card-github-badge__check {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-xs);
+}
+.card-github-badge__check--success {
+  color: var(--color-success);
+}
+.card-github-badge__check--failure {
+  color: var(--color-error);
+}
+.card-github-badge__check--pending {
+  color: var(--color-warning);
+}
 .card-github-badge--completed {
   background: color-mix(in srgb, var(--in-progress) 20%, transparent);
   color: var(--in-progress);

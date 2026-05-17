@@ -1,4 +1,4 @@
-import { GitPullRequest, CircleDot } from "lucide-react";
+import { GitPullRequest, CircleDot, CheckCircle2, XCircle, Clock } from "lucide-react";
 import type { IssueInfo, PrInfo } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 
@@ -17,18 +17,41 @@ function getIssueModifierClass(state: string, stateReason?: string): string {
 }
 
 export function GitHubBadge({ prInfo, issueInfo, onIssueRefresh: _onIssueRefresh }: GitHubBadgeProps) {
+  const prState = prInfo?.isDraft || prInfo?.status === "draft" ? "draft" : prInfo?.status;
+  const checkRollup = prInfo?.checkRollup;
+  const checkClass = checkRollup && checkRollup !== "none" ? `card-github-badge__check card-github-badge__check--${checkRollup}` : null;
+  const checkTitle = checkRollup && checkRollup !== "none" ? ` — checks: ${checkRollup}` : "";
+  const prTitle = prInfo
+    ? `PR #${prInfo.number}${prState === "draft" ? " (draft)" : ""}: ${prInfo.title}${checkTitle}`
+    : "";
+
   return (
     <>
       {prInfo && (
         <a
-          className={`card-github-badge card-github-badge--${prInfo.status}`}
-          title={`PR #${prInfo.number}: ${prInfo.title}`}
+          className={`card-github-badge card-github-badge--${prState}`}
+          title={prTitle}
           href={prInfo.url}
           target="_blank"
           rel="noopener noreferrer"
         >
           <GitPullRequest size={10} />
           <span>#{prInfo.number}</span>
+          {checkClass && checkRollup === "success" && (
+            <span className={checkClass}>
+              <CheckCircle2 size={10} />
+            </span>
+          )}
+          {checkClass && checkRollup === "failure" && (
+            <span className={checkClass}>
+              <XCircle size={10} />
+            </span>
+          )}
+          {checkClass && checkRollup === "pending" && (
+            <span className={checkClass}>
+              <Clock size={10} />
+            </span>
+          )}
         </a>
       )}
       {issueInfo && (
