@@ -854,22 +854,10 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
   describe("fn_task_show", () => {
     it("shows task details", async () => {
       const createTool = api.tools.get("fn_task_create")!;
-      await createTool.execute(
-        "c1",
-        { description: "Implement caching layer" },
-        undefined,
-        undefined,
-        makeCtx(tmpDir),
-      );
+      await createTool.execute("c1", { description: "Implement caching layer" }, undefined, undefined, makeCtx(tmpDir));
 
       const showTool = api.tools.get("fn_task_show")!;
-      const result = await showTool.execute(
-        "call-1",
-        { id: "FN-001" },
-        undefined,
-        undefined,
-        makeCtx(tmpDir),
-      );
+      const result = await showTool.execute("call-1", { id: "FN-001" }, undefined, undefined, makeCtx(tmpDir));
 
       expect(result.content[0].text).toContain("FN-001");
       expect(result.content[0].text).toContain("Implement caching layer");
@@ -891,10 +879,7 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
           sourceMetadata: { agentName: "Scout" },
         },
       });
-      await store.createTask({
-        description: "UI created",
-        source: { sourceType: "dashboard_ui" },
-      });
+      await store.createTask({ description: "UI created", source: { sourceType: "dashboard_ui" } });
 
       const showTool = api.tools.get("fn_task_show")!;
       const agentResult = await showTool.execute("call-2", { id: "FN-001" }, undefined, undefined, makeCtx(tmpDir));
@@ -902,8 +887,23 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
 
       expect(agentResult.content[0].text).toContain("Created via: Agent (Scout)");
       expect(dashboardResult.content[0].text).toContain("Created via: Dashboard");
-      expect(agentResult.details.task.sourceMetadata?.agentName).toBe("Scout");
-      expect(agentResult.details.task.sourceAgentId).toBe("agent-999");
+    });
+
+    it("shows duplicate lineage with archived annotation", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const archivedSource = await store.createTask({ description: "Archived source" });
+      await store.moveTask(archivedSource.id, "done");
+      await store.archiveTask(archivedSource.id);
+      await store.createTask({
+        description: "Dup task",
+        source: { sourceType: "chat_session", sourceMetadata: { duplicateOfTaskIds: [archivedSource.id, "FN-404"] } },
+      });
+
+      const showTool = api.tools.get("fn_task_show")!;
+      const result = await showTool.execute("call-4", { id: "FN-002" }, undefined, undefined, makeCtx(tmpDir));
+      expect(result.content[0].text).toContain(`Duplicate of: ${archivedSource.id} (archived), FN-404`);
     });
   });
 

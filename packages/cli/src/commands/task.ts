@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry } from "@fusion/core";
+import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, getTaskDuplicateLineage, type Settings, type Column, type StepStatus, type AgentLogType, type AgentLogEntry } from "@fusion/core";
 import { aiMergeTask, listBranchRecoveryCandidates, type BranchRecoveryCandidate } from "@fusion/engine";
 import { createInterface } from "node:readline/promises";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
@@ -57,6 +57,22 @@ function getResearchSourceContext(sourceMetadata: unknown): string | undefined {
 
   const runId = (sourceMetadata as { runId?: unknown }).runId;
   return typeof runId === "string" && runId.length > 0 ? runId : undefined;
+}
+
+async function formatTaskDuplicateLineage(task: Awaited<ReturnType<TaskStore["getTask"]>>, store: TaskStore): Promise<string | null> {
+  const lineage = getTaskDuplicateLineage(task);
+  if (lineage.length === 0) return null;
+
+  const labels = await Promise.all(lineage.map(async (id) => {
+    try {
+      const linked = await store.getTask(id);
+      return linked.column === "archived" ? `${id} (archived)` : id;
+    } catch {
+      return id;
+    }
+  }));
+
+  return labels.join(", ");
 }
 
 function formatTaskSource(task: {
@@ -676,6 +692,10 @@ export async function runTaskShow(id: string, projectName?: string) {
   const sourceSummary = formatTaskSource(task);
   if (sourceSummary) {
     console.log(`  Source: ${sourceSummary}`);
+  }
+  const duplicateLineage = await formatTaskDuplicateLineage(task, store);
+  if (duplicateLineage) {
+    console.log(`  Duplicate of: ${duplicateLineage}`);
   }
   console.log();
 

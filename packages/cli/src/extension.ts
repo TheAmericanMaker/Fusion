@@ -19,6 +19,7 @@ import {
   resolveResearchSettings,
   canAgentTakeImplementationTaskForExplicitRouting,
   formatRoleMismatchReason,
+  getTaskDuplicateLineage,
   resolveAgentProvisioningPolicy,
   TASK_PRIORITIES,
   resolveSecretAccessPolicy,
@@ -267,6 +268,22 @@ function getTaskSourceLabel(task: Pick<Task, "sourceType" | "sourceMetadata" | "
     default:
       return undefined;
   }
+}
+
+async function formatDuplicateLineageLine(task: Task, store: TaskStore): Promise<string | null> {
+  const lineage = getTaskDuplicateLineage(task);
+  if (lineage.length === 0) return null;
+
+  const labels = await Promise.all(lineage.map(async (id) => {
+    try {
+      const linked = await store.getTask(id);
+      return linked.column === "archived" ? `${id} (archived)` : id;
+    } catch {
+      return id;
+    }
+  }));
+
+  return `Duplicate of: ${labels.join(", ")}`;
 }
 
 function formatTaskLine(t: Task): string {
@@ -754,6 +771,10 @@ export default function kbExtension(pi: ExtensionAPI) {
       const sourceLabel = getTaskSourceLabel(task);
       if (sourceLabel) {
         lines.push(`Created via: ${sourceLabel}`);
+      }
+      const duplicateLineage = await formatDuplicateLineageLine(task, store);
+      if (duplicateLineage) {
+        lines.push(duplicateLineage);
       }
       if (task.paused) lines.push("Status: PAUSED");
       lines.push("");

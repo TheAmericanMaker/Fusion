@@ -42,6 +42,17 @@ vi.mock("@fusion/core", () => {
     TaskStore: vi.fn(),
     COLUMNS,
     COLUMN_LABELS,
+    getTaskDuplicateLineage: vi.fn((task: { sourceType?: string; sourceParentTaskId?: string; sourceMetadata?: any }) => {
+      const ids: string[] = [];
+      if (task.sourceType === "task_duplicate" && task.sourceParentTaskId) ids.push(task.sourceParentTaskId);
+      const metadata = task.sourceMetadata?.duplicateOfTaskIds;
+      if (Array.isArray(metadata)) {
+        for (const id of metadata) {
+          if (typeof id === "string" && !ids.includes(id)) ids.push(id);
+        }
+      }
+      return ids;
+    }),
     CentralCore: vi.fn().mockImplementation(function() {
       return {
         init: vi.fn().mockResolvedValue(undefined),
@@ -218,6 +229,28 @@ describe("runTaskShow", () => {
 
     const output = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
     expect(output).not.toContain("Source:");
+  });
+
+  it("prints duplicate lineage from metadata and task_duplicate parent", async () => {
+    mockTaskStoreGetTask(makeTask({
+      sourceType: "task_duplicate",
+      sourceParentTaskId: "FN-2905",
+      sourceMetadata: { duplicateOfTaskIds: ["FN-9"] },
+    }));
+
+    await runTaskShow("FN-001");
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("Duplicate of: FN-2905, FN-9");
+  });
+
+  it("prints duplicate lineage from metadata list", async () => {
+    mockTaskStoreGetTask(makeTask({ sourceMetadata: { duplicateOfTaskIds: ["FN-1", "FN-2"] } }));
+
+    await runTaskShow("FN-001");
+
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("Duplicate of: FN-1, FN-2");
   });
 });
 
