@@ -14,6 +14,19 @@ Use the inline input on board/list view:
 - Press Enter
 - Task is created in `planning`
 
+### Duplicate-task detection at creation time (Quick Entry)
+
+Dashboard `POST /tasks` now performs a pre-create duplicate gate using token-overlap similarity against recent non-done tasks (default threshold `0.45`, excluding `done`/`archived`).
+
+- `POST /api/tasks/duplicate-check` accepts `{ title?, description, limit?, threshold? }` and returns `{ matches }` for UI preflight warnings.
+- `POST /api/tasks` accepts optional `acknowledgedDuplicates?: string[]` and `bypassDuplicateCheck?: boolean`.
+  - If candidates remain after acknowledgement filtering, the route returns `409` with `{ error: "duplicate_candidates", details: { matches } }`.
+  - If `bypassDuplicateCheck: true`, the gate is skipped.
+- When creation proceeds with acknowledged candidates, created task metadata stores:
+  - `task.source.sourceMetadata.duplicateWarningOverridden = true`
+  - `task.source.sourceMetadata.acknowledgedDuplicateIds = [...]`
+- Override creates emit activity type `task:duplicate-warning-overridden` with acknowledged IDs and scored candidate metadata.
+
 ### 2) Plan Mode (AI interview)
 
 Use the 💡 button to open planning mode:

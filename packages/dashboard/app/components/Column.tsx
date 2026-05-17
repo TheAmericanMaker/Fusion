@@ -468,6 +468,16 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, onMoveTask, 
               favoriteModels={favoriteModels}
               onToggleFavorite={onToggleFavorite}
               onToggleModelFavorite={onToggleModelFavorite}
+              onOpenTask={(taskId) => {
+                const matchingTask = (allTasks ?? []).find((candidate) => candidate.id === taskId);
+                if (matchingTask) {
+                  onOpenDetail(matchingTask);
+                  return;
+                }
+                if (typeof window !== "undefined") {
+                  window.location.hash = `#/tasks/${taskId}`;
+                }
+              }}
             />
           )}
           {column === "in-progress" ? (

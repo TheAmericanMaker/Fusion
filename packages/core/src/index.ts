@@ -115,6 +115,12 @@ export type {
   SandboxProvisioningPolicyDecision,
 } from "./sandbox-provisioning-policy.js";
 export { TaskStore } from "./store.js";
+export {
+  findDuplicateMatches,
+  type DuplicateCandidate,
+  type DuplicateMatch,
+  type DuplicateMatchInput,
+} from "./duplicate-detection.js";
 export { computeRetrySummary, RETRY_STORM_WARNING_RATIO } from "./retry-summary.js";
 export { RetryStormError, serializeRetryStormError } from "./retry-storm-error.js";
 export { aggregateAgentTokenUsage } from "./agent-token-usage.js";

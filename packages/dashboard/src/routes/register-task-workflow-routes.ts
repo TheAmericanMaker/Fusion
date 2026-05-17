@@ -1,5 +1,16 @@
 import { createReadStream } from "node:fs";
-import type { TaskStore, Task, TaskDetail, Column, TaskReviewData, TaskReviewItem, TaskReviewSummary, GithubIssueAction } from "@fusion/core";
+import type {
+  TaskStore,
+  Task,
+  TaskDetail,
+  Column,
+  TaskReviewData,
+  TaskReviewItem,
+  TaskReviewSummary,
+  GithubIssueAction,
+  DuplicateCandidate,
+  DuplicateMatch,
+} from "@fusion/core";
 import {
   COLUMNS,
   TASK_PRIORITIES,
@@ -11,6 +22,7 @@ import {
   canAgentTakeImplementationTaskForExplicitRouting,
   formatRoleMismatchReason,
   getCurrentRepo,
+  findDuplicateMatches,
 } from "@fusion/core";
 import { GitHubClient } from "../github.js";
 import { createTrackingIssueForTask } from "../github-tracking-hook.js";
@@ -23,6 +35,53 @@ import { resolveBranchSelection } from "./branch-selection.js";
 const REVIEW_BLOCK_RE = /##\s+(Code|Plan)\s+Review:[\s\S]*?(?=\n##\s+(?:Code|Plan)\s+Review:|$)/gi;
 const REVIEW_VERDICT_RE = /###\s+Verdict:\s*(APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const REVIEW_STEP_RE = /^(plan|code) review Step (\d+): (APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
+const DUPLICATE_STOPWORDS = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "is", "on", "with", "fn"]);
+
+function buildDuplicateQuery(title: string | undefined, description: string): string {
+  const tokens = `${title ?? ""} ${description}`
+    .toLowerCase()
+    .split(/\W+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && !DUPLICATE_STOPWORDS.has(token));
+
+  const deduped = [...new Set(tokens)];
+  const selected = deduped.sort((left, right) => right.length - left.length).slice(0, 5);
+  return selected.join(" ");
+}
+
+async function computeDuplicateMatches(
+  scopedStore: TaskStore,
+  input: { title?: string; description: string; limit?: number; threshold?: number },
+): Promise<DuplicateMatch[]> {
+  const query = buildDuplicateQuery(input.title, input.description);
+  if (query.length === 0) {
+    return [];
+  }
+
+  const results = await scopedStore.searchTasks(query, {
+    slim: true,
+    includeArchived: false,
+    limit: 20,
+  });
+  const candidates: DuplicateCandidate[] = results.map((task) => ({
+    id: task.id,
+    title: task.title ?? "",
+    description: task.description ?? "",
+    column: task.column,
+  }));
+
+  return findDuplicateMatches(
+    {
+      title: input.title,
+      description: input.description,
+    },
+    candidates,
+    {
+      threshold: input.threshold,
+      limit: input.limit ?? 5,
+    },
+  );
+}
 
 function buildReviewerAgentItemId(input: { index: number; reviewType: "plan" | "code"; step?: number; verdict?: string; createdAt?: string }): string {
   const stepPart = input.step ? `step-${input.step}` : "step-na";
@@ -155,6 +214,38 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  router.post("/tasks/duplicate-check", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const { title, description, limit, threshold } = req.body ?? {};
+
+      if (typeof description !== "string" || description.trim().length === 0) {
+        throw badRequest("description is required");
+      }
+      if (limit !== undefined && (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1)) {
+        throw badRequest("limit must be a positive integer");
+      }
+      if (threshold !== undefined && (typeof threshold !== "number" || Number.isNaN(threshold))) {
+        throw badRequest("threshold must be a number");
+      }
+
+      const matches = await computeDuplicateMatches(scopedStore, {
+        title: typeof title === "string" ? title : undefined,
+        description: description.trim(),
+        limit,
+        threshold,
+      });
+
+      res.json({ matches });
+      return;
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
   // Create task
   router.post("/tasks", async (req, res) => {
     try {
@@ -183,9 +274,21 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         branchSelection,
         nodeId,
         githubTracking,
+        acknowledgedDuplicates,
+        bypassDuplicateCheck,
       } = req.body;
       if (!description || typeof description !== "string") {
         throw badRequest("description is required");
+      }
+      if (
+        acknowledgedDuplicates !== undefined
+        && (!Array.isArray(acknowledgedDuplicates)
+          || !acknowledgedDuplicates.every((taskId: unknown) => typeof taskId === "string" && /^[A-Z]+-\d+$/.test(taskId)))
+      ) {
+        throw badRequest("acknowledgedDuplicates must be an array of task IDs");
+      }
+      if (bypassDuplicateCheck !== undefined && typeof bypassDuplicateCheck !== "boolean") {
+        throw badRequest("bypassDuplicateCheck must be a boolean");
       }
       if (breakIntoSubtasks !== undefined && typeof breakIntoSubtasks !== "boolean") {
         throw badRequest("breakIntoSubtasks must be a boolean");
@@ -301,9 +404,23 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         };
       }
 
+      const normalizedDescription = description.trim();
+      const normalizedTitle = typeof title === "string" ? title : undefined;
+      const acknowledgedDuplicateIds = acknowledgedDuplicates ?? [];
+      const duplicateMatches = bypassDuplicateCheck === true
+        ? []
+        : await computeDuplicateMatches(scopedStore, {
+            title: normalizedTitle,
+            description: normalizedDescription,
+          });
+      const matchesAfterAckFilter = duplicateMatches.filter((match) => !acknowledgedDuplicateIds.includes(match.id));
+      if (matchesAfterAckFilter.length > 0) {
+        throw conflict("duplicate_candidates", { matches: matchesAfterAckFilter });
+      }
+
       const createInput = {
-        title,
-        description,
+        title: normalizedTitle,
+        description: normalizedDescription,
         column,
         dependencies,
         breakIntoSubtasks,
@@ -320,7 +437,17 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         reviewLevel: reviewLevel ?? undefined,
         executionMode: executionMode || undefined,
         priority: priority ?? undefined,
-        source: normalizedSource,
+        source:
+          acknowledgedDuplicateIds.length > 0
+            ? {
+                ...(normalizedSource as Record<string, unknown>),
+                sourceMetadata: {
+                  ...((normalizedSource as { sourceMetadata?: Record<string, unknown> }).sourceMetadata ?? {}),
+                  duplicateWarningOverridden: true,
+                  acknowledgedDuplicateIds,
+                },
+              }
+            : normalizedSource,
         branch: normalizedBranch,
         baseBranch: normalizedBaseBranch,
         ...(typeof nodeId === "string" && nodeId.trim().length > 0 ? { nodeId: nodeId.trim() } : {}),
@@ -332,6 +459,27 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         { onSummarize, settings: { autoSummarizeTitles: settings.autoSummarizeTitles } },
       );
       await createTrackingIssueForTask(scopedStore, task, { githubToken: options?.githubToken });
+
+      if (acknowledgedDuplicateIds.length > 0) {
+        try {
+          await scopedStore.recordActivity({
+            type: "task:duplicate-warning-overridden",
+            taskId: task.id,
+            taskTitle: task.title,
+            details: `Created despite ${acknowledgedDuplicateIds.length} possible duplicate(s): ${acknowledgedDuplicateIds.join(", ")}`,
+            metadata: {
+              acknowledgedDuplicateIds,
+              matches: matchesAfterAckFilter.map((match) => ({ id: match.id, score: match.score })),
+            },
+          });
+        } catch (error) {
+          runtimeLogger.warn("Failed to record duplicate warning override activity", {
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       res.status(201).json(task);
       return;
     } catch (err: unknown) {

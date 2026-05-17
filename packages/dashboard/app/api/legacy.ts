@@ -291,13 +291,47 @@ export interface ReviseTaskReviewResponse {
   reviewState: NonNullable<TaskDetail["reviewState"]>;
 }
 
+export interface DuplicateMatch {
+  id: string;
+  title: string;
+  description: string;
+  column: string;
+  score: number;
+}
+
+export class DuplicateCandidatesError extends Error {
+  readonly matches: DuplicateMatch[];
+
+  constructor(matches: DuplicateMatch[]) {
+    super("duplicate_candidates");
+    this.name = "DuplicateCandidatesError";
+    this.matches = matches;
+  }
+}
+
 export interface CreateTaskRequestOptions {
   transportNodeId?: string;
   localNodeId?: string;
 }
 
-export function createTask(
-  input: TaskCreateInput,
+export type CreateTaskInput = TaskCreateInput & {
+  acknowledgedDuplicates?: string[];
+  bypassDuplicateCheck?: boolean;
+};
+
+export async function checkDuplicateTasks(
+  input: { title?: string; description: string },
+  projectId?: string,
+): Promise<DuplicateMatch[]> {
+  const response = await api<{ matches?: DuplicateMatch[] }>(withProjectId("/tasks/duplicate-check", projectId), {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return response.matches ?? [];
+}
+
+export async function createTask(
+  input: CreateTaskInput,
   projectId?: string,
   options?: CreateTaskRequestOptions,
 ): Promise<Task> {
@@ -326,9 +360,12 @@ export function createTask(
     branch,
     baseBranch,
     githubTracking,
+    acknowledgedDuplicates,
+    bypassDuplicateCheck,
   } = input;
 
-  return proxyApi<Task>(withProjectId("/tasks", projectId), {
+  try {
+    return await proxyApi<Task>(withProjectId("/tasks", projectId), {
     method: "POST",
     nodeId: options?.transportNodeId,
     localNodeId: options?.localNodeId,
@@ -357,8 +394,19 @@ export function createTask(
       branch,
       baseBranch,
       githubTracking,
+      acknowledgedDuplicates,
+      bypassDuplicateCheck,
     }),
   });
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 409 && error.message === "duplicate_candidates") {
+      const matches = Array.isArray(error.details?.matches)
+        ? (error.details?.matches as DuplicateMatch[])
+        : [];
+      throw new DuplicateCandidatesError(matches);
+    }
+    throw error;
+  }
 }
 
 export function updateTask(
@@ -5665,6 +5713,7 @@ export interface ActivityFeedEntry {
     | "task:deleted"
     | "task:merged"
     | "task:failed"
+    | "task:duplicate-warning-overridden"
     | "settings:updated"
     | "project:isolation-transition";
   projectId: string;

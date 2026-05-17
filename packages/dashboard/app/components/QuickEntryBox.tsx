@@ -3,9 +3,10 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { ToastType } from "../hooks/useToast";
 import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, getErrorMessage } from "@fusion/core";
-import type { Task, TaskCreateInput, Settings, TaskPriority } from "@fusion/core";
-import type { ModelInfo, RefinementType, Agent } from "../api";
-import { fetchModels, fetchSettings, refineText, getRefineErrorMessage, updateGlobalSettings, fetchAgents, uploadAttachment } from "../api";
+import type { Task, Settings, TaskPriority } from "@fusion/core";
+import type { ModelInfo, RefinementType, Agent, CreateTaskInput, DuplicateMatch } from "../api";
+import { checkDuplicateTasks, fetchModels, fetchSettings, refineText, getRefineErrorMessage, updateGlobalSettings, fetchAgents, uploadAttachment } from "../api";
+import { DuplicateWarningModal } from "./DuplicateWarningModal";
 import { Link, Paperclip, Brain, Lightbulb, ListTree, Sparkles, Save, ChevronDown, ChevronUp, ChevronRight, Bot, Server, Flag } from "lucide-react";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/projectStorage";
@@ -23,7 +24,7 @@ interface PendingImage {
 }
 
 interface QuickEntryBoxProps {
-  onCreate?: (input: TaskCreateInput) => Promise<Task | void>;
+  onCreate?: (input: CreateTaskInput) => Promise<Task | void>;
   addToast: (message: string, type?: ToastType) => void;
   tasks?: Task[];
   availableModels?: ModelInfo[];
@@ -63,6 +64,7 @@ interface QuickEntryBoxProps {
    * Toggle favorite model callback from shared app-level state.
    */
   onToggleModelFavorite?: (modelId: string) => void;
+  onOpenTask?: (id: string) => void;
 }
 
 function getNodeStatusLabel(status: NodeInfo["status"]): string {
@@ -92,7 +94,7 @@ function parseModelSelection(value: string): { provider?: string; modelId?: stri
   };
 }
 
-export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels, onPlanningMode, onSubtaskBreakdown, projectId, autoExpand = true, favoriteProviders: parentFavoriteProviders, favoriteModels: parentFavoriteModels, onToggleFavorite: parentToggleFavorite, onToggleModelFavorite: parentToggleModelFavorite }: QuickEntryBoxProps) {
+export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels, onPlanningMode, onSubtaskBreakdown, projectId, autoExpand = true, favoriteProviders: parentFavoriteProviders, favoriteModels: parentFavoriteModels, onToggleFavorite: parentToggleFavorite, onToggleModelFavorite: parentToggleModelFavorite, onOpenTask }: QuickEntryBoxProps) {
   const [description, setDescription] = useState(() => {
     if (typeof window !== "undefined") {
       return getScopedItem(STORAGE_KEY, projectId) || "";
@@ -161,8 +163,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [githubTrackingOverride, setGithubTrackingOverride] = useState<boolean | null>(null);
   const [priority, setPriority] = useState<TaskPriority>(DEFAULT_TASK_PRIORITY);
   const [nodeId, setNodeId] = useState<string | undefined>(undefined);
+  const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[] | null>(null);
   const { nodes } = useNodes();
-
   // AI Refinement state
   const [isRefineMenuOpen, setIsRefineMenuOpen] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
@@ -489,13 +491,13 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     });
   }, []);
 
-  const handleSubmit = useCallback(async () => {
-    const trimmed = description.trim();
-    if (!trimmed || isSubmitting || !onCreate) return;
+  const submitCreateTask = useCallback(async (trimmed: string, overrides?: { acknowledgedDuplicates?: string[] }) => {
+    if (!onCreate) {
+      return;
+    }
 
     const originalDescription = description;
     setIsSubmitting(true);
-    // Optimistically clear text for rapid entry; restore on failure.
     setDescription("");
     try {
       const createdTask = await onCreate({
@@ -516,6 +518,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
           : undefined,
         priority,
         nodeId,
+        acknowledgedDuplicates: overrides?.acknowledgedDuplicates,
       });
       if (createdTask && pendingImages.length > 0) {
         const failures: string[] = [];
@@ -531,22 +534,19 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
           addToast(`Failed to upload: ${failures.join(", ")}`, "error");
         }
       }
-      // Clear input for rapid entry
       resetForm();
-      // Note: Focus restoration is handled by useEffect when isSubmitting becomes false
     } catch (err) {
       setDescription(originalDescription);
       addToast(getErrorMessage(err) || "Failed to create task", "error");
-      // Keep input content on failure so user can retry
     } finally {
       setIsSubmitting(false);
     }
   }, [
-    description,
-    isSubmitting,
     onCreate,
+    description,
     dependencies,
     selectedAgentId,
+    selectedPresetId,
     hasExecutorOverride,
     executorProvider,
     executorModelId,
@@ -556,16 +556,57 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     hasPlanningOverride,
     planningProvider,
     planningModelId,
+    isFastMode,
+    settings,
+    githubTrackingOverride,
+    priority,
+    nodeId,
     pendingImages,
     projectId,
     addToast,
     resetForm,
-    isFastMode,
-    githubTrackingOverride,
-    settings,
-    priority,
-    nodeId,
   ]);
+
+  const handleSubmit = useCallback(async () => {
+    const trimmed = description.trim();
+    if (!trimmed || isSubmitting || !onCreate) return;
+
+    try {
+      const matches = await checkDuplicateTasks({ description: trimmed }, projectId);
+      if (matches.length > 0) {
+        setDuplicateMatches(matches);
+        return;
+      }
+    } catch (_error) {
+      addToast("Duplicate check failed; creating task anyway.", "error");
+    }
+
+    await submitCreateTask(trimmed);
+  }, [description, isSubmitting, onCreate, projectId, submitCreateTask, addToast]);
+
+  const handleDuplicateOpen = useCallback((taskId: string) => {
+    if (onOpenTask) {
+      onOpenTask(taskId);
+    } else if (typeof window !== "undefined") {
+      window.location.hash = `#/tasks/${taskId}`;
+    }
+    setDuplicateMatches(null);
+  }, [onOpenTask]);
+
+  const handleDuplicateProceed = useCallback(async () => {
+    const trimmed = description.trim();
+    const matches = duplicateMatches;
+    if (!trimmed || !matches || matches.length === 0) {
+      setDuplicateMatches(null);
+      return;
+    }
+    setDuplicateMatches(null);
+    await submitCreateTask(trimmed, { acknowledgedDuplicates: matches.map((match) => match.id) });
+  }, [description, duplicateMatches, submitCreateTask]);
+
+  const handleDuplicateCancel = useCallback(() => {
+    setDuplicateMatches(null);
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1357,7 +1398,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   }, []);
 
   return (
-    <div className={`quick-entry-box ${isDisclosureExpanded ? "quick-entry-box--expanded" : "quick-entry-box--collapsed"}`} data-testid="quick-entry-box">
+    <>
+      <div className={`quick-entry-box ${isDisclosureExpanded ? "quick-entry-box--expanded" : "quick-entry-box--collapsed"}`} data-testid="quick-entry-box">
       <div className="description-with-refine">
         <div className="quick-entry-main-row">
           <div className="quick-entry-textarea-wrap">
@@ -2045,5 +2087,14 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
           Enter to create · Esc to cancel
         </div>
       </div>
+      {duplicateMatches && (
+        <DuplicateWarningModal
+          matches={duplicateMatches}
+          onOpen={handleDuplicateOpen}
+          onProceed={handleDuplicateProceed}
+          onCancel={handleDuplicateCancel}
+        />
+      )}
+    </>
   );
 }

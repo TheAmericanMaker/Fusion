@@ -89,8 +89,8 @@ export function notFound(message: string): ApiError {
   return new ApiError(404, message);
 }
 
-export function conflict(message: string): ApiError {
-  return new ApiError(409, message);
+export function conflict(message: string, details?: Record<string, unknown>): ApiError {
+  return new ApiError(409, message, details);
 }
 
 export function rateLimited(message: string, retryAfter?: number): ApiError {

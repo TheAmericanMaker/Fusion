@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { QuickEntryBox } from "../QuickEntryBox";
 import type { Task } from "@fusion/core";
-import { fetchSettings, fetchAgents, uploadAttachment } from "../../api";
+import { checkDuplicateTasks, fetchSettings, fetchAgents, uploadAttachment } from "../../api";
 import { useNodes } from "../../hooks/useNodes";
 import { scopedKey } from "../../utils/projectStorage";
 
@@ -98,6 +98,7 @@ vi.mock("../../api", () => ({
   refineText: vi.fn(),
   getRefineErrorMessage: vi.fn((err) => err?.message || "Failed to refine text. Please try again."),
   fetchAgents: vi.fn().mockResolvedValue([]),
+  checkDuplicateTasks: vi.fn().mockResolvedValue([]),
   uploadAttachment: vi.fn().mockResolvedValue({}),
   updateGlobalSettings: vi.fn().mockResolvedValue({}),
 }));
@@ -256,6 +257,7 @@ describe("QuickEntryBox", () => {
       healthCheck: vi.fn(),
     });
     vi.mocked(uploadAttachment).mockResolvedValue({} as any);
+    vi.mocked(checkDuplicateTasks).mockResolvedValue([]);
 
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
@@ -3334,4 +3336,66 @@ describe("QuickEntryBox", () => {
 
     expect(screen.getByTestId("quick-entry-node-button")).toHaveTextContent("Node Two");
   });
+
+  describe("FN-4829 duplicate detection", () => {
+    it("opens duplicate warning modal and does not create immediately", async () => {
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(checkDuplicateTasks).mockResolvedValueOnce([
+        { id: "FN-123", title: "Duplicate", description: "desc", column: "todo", score: 0.9 },
+      ]);
+      renderQuickEntryBox({ onCreate });
+
+      const input = screen.getByTestId("quick-entry-input");
+      fireEvent.change(input, { target: { value: "duplicate candidate" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(await screen.findByText("Possible duplicates")).toBeInTheDocument();
+      expect(onCreate).not.toHaveBeenCalled();
+    });
+
+    it("creates immediately when duplicate check has no matches", async () => {
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(checkDuplicateTasks).mockResolvedValueOnce([]);
+      renderQuickEntryBox({ onCreate });
+
+      const input = screen.getByTestId("quick-entry-input");
+      fireEvent.change(input, { target: { value: "fresh task" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      expect(onCreate.mock.calls[0]?.[0]).toHaveProperty("acknowledgedDuplicates", undefined);
+    });
+
+    it("sends acknowledgedDuplicates when creating anyway", async () => {
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(checkDuplicateTasks).mockResolvedValueOnce([
+        { id: "FN-456", title: "Duplicate", description: "desc", column: "todo", score: 0.7 },
+      ]);
+      renderQuickEntryBox({ onCreate });
+
+      const input = screen.getByTestId("quick-entry-input");
+      fireEvent.change(input, { target: { value: "maybe duplicate" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.click(await screen.findByRole("button", { name: "Create anyway" }));
+
+      await waitFor(() => {
+        expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ acknowledgedDuplicates: ["FN-456"] }));
+      });
+    });
+
+    it("continues creation when duplicate check fails and shows toast", async () => {
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      const addToast = vi.fn();
+      vi.mocked(checkDuplicateTasks).mockRejectedValueOnce(new Error("boom"));
+      renderQuickEntryBox({ onCreate, addToast });
+
+      const input = screen.getByTestId("quick-entry-input");
+      fireEvent.change(input, { target: { value: "task despite failure" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      expect(addToast).toHaveBeenCalledWith("Duplicate check failed; creating task anyway.", "error");
+    });
+  });
+
 });

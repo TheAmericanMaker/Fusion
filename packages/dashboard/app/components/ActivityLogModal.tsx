@@ -30,6 +30,7 @@ const EVENT_TYPE_LABELS: Record<ActivityEventType, string> = {
   "task:deleted": "Task Deleted",
   "task:merged": "Task Merged",
   "task:failed": "Task Failed",
+  "task:duplicate-warning-overridden": "Duplicate Warning Overridden",
   "settings:updated": "Settings Updated",
   "project:isolation-transition": "Project Isolation Transition",
 };
@@ -41,6 +42,7 @@ const EVENT_TYPE_ICONS: Record<ActivityEventType, React.ReactNode> = {
   "task:deleted": <X size={14} className="activity-icon deleted" />,
   "task:merged": <CheckCircle size={14} className="activity-icon merged" />,
   "task:failed": <XCircle size={14} className="activity-icon failed" />,
+  "task:duplicate-warning-overridden": <AlertCircle size={14} className="activity-icon updated" />,
   "settings:updated": <Settings size={14} className="activity-icon settings" />,
   "project:isolation-transition": <Folder size={14} className="activity-icon settings" />,
 };

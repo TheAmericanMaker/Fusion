@@ -853,6 +853,7 @@ export type ActivityEventType =
   | "task:deleted"
   | "task:merged"
   | "task:failed"
+  | "task:duplicate-warning-overridden"
   | "settings:updated"
   | "project:isolation-transition";
 

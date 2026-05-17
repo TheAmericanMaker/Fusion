@@ -1514,6 +1514,16 @@ export function ListView({
                 favoriteModels={favoriteModels}
                 onToggleFavorite={onToggleFavorite}
                 onToggleModelFavorite={onToggleModelFavorite}
+                onOpenTask={(taskId) => {
+                  const matchingTask = tasks.find((candidate) => candidate.id === taskId);
+                  if (matchingTask) {
+                    onOpenDetail(matchingTask);
+                    return;
+                  }
+                  if (typeof window !== "undefined") {
+                    window.location.hash = `#/tasks/${taskId}`;
+                  }
+                }}
               />
             </div>
         {filteredCount === 0 ? (
