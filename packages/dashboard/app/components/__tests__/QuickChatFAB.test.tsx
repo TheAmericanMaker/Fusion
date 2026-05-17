@@ -455,6 +455,82 @@ describe("QuickChatFAB session-first UX", () => {
     expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message GPT-4o");
   });
 
+  it("FN-4804: session dropdown keeps explicit older model-session selection", async () => {
+    mockFetchChatSessions.mockResolvedValueOnce({
+      sessions: [
+        {
+          ...modelSession,
+          id: "model-older",
+          updatedAt: "2026-05-13T08:00:00.000Z",
+          lastMessageAt: "2026-05-13T08:00:00.000Z",
+        },
+        {
+          ...modelSession,
+          id: "model-newer",
+          updatedAt: "2026-05-13T10:00:00.000Z",
+          lastMessageAt: "2026-05-13T10:00:00.000Z",
+        },
+      ],
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("model-newer");
+    });
+
+    mockFetchResumeChatSession.mockClear();
+
+    fireEvent.click(screen.getByTestId("quick-chat-session-dropdown-trigger"));
+    fireEvent.click(screen.getByTestId("quick-chat-session-option-model-older"));
+
+    await waitFor(async () => {
+      await Promise.resolve();
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("model-older");
+    });
+    expect(mockFetchResumeChatSession).not.toHaveBeenCalled();
+  });
+
+  it("FN-4804: switching dropdown from model session to agent session preserves explicit pick", async () => {
+    mockFetchChatSessions.mockResolvedValueOnce({
+      sessions: [
+        {
+          ...modelSession,
+          id: "model-newer",
+          updatedAt: "2026-05-13T10:00:00.000Z",
+          lastMessageAt: "2026-05-13T10:00:00.000Z",
+        },
+        {
+          ...agentTwoSession,
+          id: "agent-older",
+          updatedAt: "2026-05-13T08:00:00.000Z",
+          lastMessageAt: "2026-05-13T08:00:00.000Z",
+        },
+      ],
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("model-newer");
+      expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message GPT-4o");
+    });
+
+    mockFetchResumeChatSession.mockClear();
+
+    fireEvent.click(screen.getByTestId("quick-chat-session-dropdown-trigger"));
+    fireEvent.click(screen.getByTestId("quick-chat-session-option-agent-older"));
+
+    await waitFor(async () => {
+      await Promise.resolve();
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("agent-older");
+      expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message Agent Two");
+    });
+    expect(mockFetchResumeChatSession).not.toHaveBeenCalled();
+  });
+
   it("FN-4804: switching from an active room to a direct session clears room display state", async () => {
     const room = {
       id: "room-1",
