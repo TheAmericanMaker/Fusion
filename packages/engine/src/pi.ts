@@ -285,14 +285,6 @@ async function promptSessionAndCheck(session: AgentSession, prompt: string, opti
 }
 
 export async function promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void> {
-  const maybePromptable = session as Partial<PromptableSession>;
-  if (typeof maybePromptable.promptWithFallback === "function") {
-    piLog.log(`promptWithFallback: delegating to session.promptWithFallback (prompt length=${prompt.length})`);
-    await maybePromptable.promptWithFallback(prompt, options);
-    piLog.log("promptWithFallback: completed");
-    return;
-  }
-
   piLog.log(`promptWithFallback: calling session.prompt (prompt length=${prompt.length})`);
   try {
     await promptSessionAndCheck(session, prompt, options);

@@ -12,6 +12,6 @@ describe("pi promptWithFallback recursion guard (FN-4900)", () => {
 
     await expect(session.promptWithFallback("hello")).resolves.toBeUndefined();
     expect(prompt).toHaveBeenCalledTimes(1);
-    expect(prompt).toHaveBeenCalledWith("hello", undefined);
+    expect(prompt).toHaveBeenCalledWith("hello");
   });
 });
