@@ -35,6 +35,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
     "message:agent-to-agent",
     "message:room",
     "gridlock",
+    "board-stall-unrecovered",
     "fallback-used",
     "memory-dreams-processed",
     "token-budget",
@@ -271,6 +272,10 @@ export const DEFAULT_PROJECT_SETTINGS = {
   taskStuckTimeoutMs: 600_000,
   inReviewStallDeadlockThreshold: 3,
   stalePausedReviewThresholdMs: 24 * 60 * 60_000,
+  pausedScopeDecayMs: 30 * 60_000,
+  metaTaskStallAutoCloseMs: 2 * 60 * 60_000,
+  boardStallSweepWindowMs: 2 * 60 * 60_000,
+  boardStallBlockedGrowthThreshold: 3,
   // Capacity risk warning default: only warn once todo is meaningfully backlogged.
   capacityRiskBannerEnabled: false,
   capacityRiskTodoThreshold: 20,

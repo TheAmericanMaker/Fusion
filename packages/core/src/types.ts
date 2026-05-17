@@ -352,6 +352,7 @@ export type NtfyNotificationEvent =
   | "awaiting-user-review"
   | "planning-awaiting-input"
   | "gridlock"
+  | "board-stall-unrecovered"
   | "fallback-used"
   | "memory-dreams-processed"
   | "token-budget"
@@ -369,6 +370,7 @@ export const NOTIFICATION_EVENTS = [
   "awaiting-user-review",
   "planning-awaiting-input",
   "gridlock",
+  "board-stall-unrecovered",
   "fallback-used",
   "memory-dreams-processed",
   "token-budget",
@@ -2891,6 +2893,22 @@ export interface ProjectSettings {
    *  Age is measured from columnMovedAt when present, otherwise updatedAt.
    *  Default: 86400000 (24 hours). Set to 0 or undefined to disable surfacing. */
   stalePausedReviewThresholdMs?: number;
+  /** Minimum age in milliseconds that a paused in-progress task may continue holding
+   *  file-scope reservation while one or more followers are blocked by it.
+   *  Self-healing rebounds qualifying holders to todo when this threshold is met.
+   *  Default: 1800000 (30 minutes). Set to 0 to disable. */
+  pausedScopeDecayMs?: number;
+  /** Maximum age in milliseconds a meta-task may remain blocked without its target
+   *  advancing before self-healing auto-archives it as superseded.
+   *  Default: 7200000 (2 hours). Set to 0 to disable. */
+  metaTaskStallAutoCloseMs?: number;
+  /** Rolling window in milliseconds for board-stall auto-recovery evaluation.
+   *  Default: 7200000 (2 hours). */
+  boardStallSweepWindowMs?: number;
+  /** Minimum blocked-edge growth within the board-stall window that qualifies as a
+   *  stall signal when there are zero transitions out of in-progress.
+   *  Default: 3. */
+  boardStallBlockedGrowthThreshold?: number;
   /** Age threshold in milliseconds before a blocker with high todo fan-out is escalated.
    *  Blocker age is measured from columnMovedAt when available, otherwise updatedAt.
    *  Only blockers currently in in-progress or in-review are eligible. */
