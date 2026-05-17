@@ -138,6 +138,7 @@ import { registerPlanningSubtaskRoutes } from "./routes/register-planning-subtas
 import { registerChatRoutes } from "./routes/register-chat-routes.js";
 import { registerChatRoomRoutes } from "./routes/register-chat-room-routes.js";
 import { registerSettingsMemoryRoutes } from "./routes/register-settings-memory-routes.js";
+import { registerSecretsRoutes } from "./routes/register-secrets-routes.js";
 import { registerMessagingScriptRoutes } from "./routes/register-messaging-scripts.js";
 import { registerGitGitHubRoutes } from "./routes/register-git-github.js";
 import { registerFilesTerminalWorkspaceRoutes } from "./routes/register-files-terminal-workspaces.js";
@@ -1007,6 +1008,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     sanitizeOverlapIgnorePaths,
     discoverDashboardPiExtensions,
   });
+  registerSecretsRoutes(routeContext);
   registerTaskWorkflowRoutes(routeContext, {
     runtimeLogger,
     upload,
