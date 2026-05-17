@@ -4564,17 +4564,35 @@ export class TaskExecutor {
               foreignCommits: err.foreignCommits,
             });
 
+            const misrouted: Array<{ commit: (typeof classified.unique)[number]; foreignTaskId: string; paths: string[] }> = [];
+            const genuinelyUnique: typeof classified.unique = [];
+            for (const commit of classified.unique) {
+              const misroutedResult = await classifyMisroutedForeignCommit({
+                repoDir: this.rootDir,
+                sha: commit.sha,
+                commitSubject: commit.subject,
+                commitBody: await execAsync(`git log -1 --format=%b ${commit.sha}`, { cwd: this.rootDir, encoding: "utf-8" }).then((r) => r.stdout).catch(() => ""),
+                currentTaskId: task.id,
+              });
+              if (misroutedResult.misrouted && misroutedResult.foreignTaskId) {
+                misrouted.push({ commit, foreignTaskId: misroutedResult.foreignTaskId, paths: misroutedResult.paths ?? [] });
+              } else {
+                genuinelyUnique.push(commit);
+              }
+            }
+
             const alreadyShas = classified.alreadyUpstream.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
-            const uniqueShas = classified.unique.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
+            const misroutedShas = misrouted.map(({ commit }) => commit.sha.slice(0, 12)).join(", ") || "none";
+            const uniqueShas = genuinelyUnique.map((commit) => commit.sha.slice(0, 12)).join(", ") || "none";
             await this.store.logEntry(
               task.id,
-              `[recovery] contamination classification: already-upstream=[${alreadyShas}] unique=[${uniqueShas}]`,
+              `[recovery] contamination classification: already-upstream=[${alreadyShas}] misrouted=[${misroutedShas}] unique=[${uniqueShas}]`,
               undefined,
               this.currentRunContext,
             );
 
             const alreadyAttemptedRecovery = (task.recoveryRetryCount ?? 0) > 0;
-            if (classified.unique.length === 0 && !alreadyAttemptedRecovery) {
+            if (genuinelyUnique.length === 0 && !alreadyAttemptedRecovery) {
               // Run the recovery inside the worktree (when one exists) so the final
               // `git checkout <branch>` step doesn't collide with the worktree's own
               // checkout. If we operate from this.rootDir while the branch is checked
@@ -4588,15 +4606,30 @@ export class TaskExecutor {
                 branchName: err.branchName,
                 baseSha: err.baseSha,
                 taskId: task.id,
-                alreadyUpstreamShas: classified.alreadyUpstream.map((commit) => commit.sha),
+                shasToDrop: [
+                  ...classified.alreadyUpstream.map((commit) => commit.sha),
+                  ...misrouted.map(({ commit }) => commit.sha),
+                ],
               });
 
               await this.store.logEntry(
                 task.id,
-                `[recovery] auto-recovered branch-cross-contamination: dropped ${recovery.droppedShas.length} already-upstream commits (SHAs: ${recovery.droppedShas.map((sha) => sha.slice(0, 12)).join(", ")}); new tip ${recovery.newTipSha.slice(0, 12)}`,
+                `[recovery] auto-recovered branch-cross-contamination: dropped ${recovery.droppedShas.length} commits (already-upstream + misrouted, SHAs: ${recovery.droppedShas.map((sha) => sha.slice(0, 12)).join(", ")}); new tip ${recovery.newTipSha.slice(0, 12)}`,
                 undefined,
                 this.currentRunContext,
               );
+
+              for (const dropped of misrouted) {
+                await audit.database({
+                  type: "task:auto-recover-misrouted-foreign-commit",
+                  target: task.id,
+                  metadata: {
+                    droppedSha: dropped.commit.sha,
+                    foreignTaskId: dropped.foreignTaskId,
+                    paths: dropped.paths,
+                  },
+                });
+              }
 
               await this.store.updateTask(task.id, {
                 recoveryRetryCount: 1,
@@ -4626,10 +4659,10 @@ export class TaskExecutor {
                 undefined,
                 this.currentRunContext,
               );
-            } else if (classified.unique.length > 0) {
+            } else if (genuinelyUnique.length > 0) {
               await this.store.logEntry(
                 task.id,
-                `[recovery] unique foreign commits require human adjudication: ${classified.unique.map((commit) => commit.sha.slice(0, 12)).join(", ")}`,
+                `[recovery] unique foreign commits require human adjudication: ${genuinelyUnique.map((commit) => commit.sha.slice(0, 12)).join(", ")}`,
                 undefined,
                 this.currentRunContext,
               );

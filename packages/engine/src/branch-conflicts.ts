@@ -697,7 +697,7 @@ export interface AutoRecoverCrossContaminationInput {
   branchName: string;
   baseSha: string;
   taskId: string;
-  alreadyUpstreamShas: string[];
+  shasToDrop: string[];
   mainRef?: string;
 }
 
@@ -709,10 +709,10 @@ export interface AutoRecoverCrossContaminationResult {
 export async function autoRecoverCrossContamination(
   input: AutoRecoverCrossContaminationInput,
 ): Promise<AutoRecoverCrossContaminationResult> {
-  const { repoDir, branchName, baseSha, taskId, alreadyUpstreamShas } = input;
-  const dropSet = new Set(alreadyUpstreamShas);
+  const { repoDir, branchName, baseSha, taskId, shasToDrop } = input;
+  const dropSet = new Set(shasToDrop);
   if (dropSet.size === 0) {
-    throw new Error("autoRecoverCrossContamination requires at least one already-upstream SHA");
+    throw new Error("autoRecoverCrossContamination requires at least one SHA to drop");
   }
 
   const originalTip = await revParse(repoDir, branchName);
