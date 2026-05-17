@@ -2236,7 +2236,7 @@ export class SelfHealingManager {
   }
 
   async reconcileSelfDefeatingDependencies(): Promise<number> {
-    const targetColumns: Array<Task["column"]> = ["triage", "planning", "todo"];
+    const targetColumns: Array<Task["column"]> = ["triage", "todo"];
     let recovered = 0;
 
     for (const column of targetColumns) {
@@ -2267,7 +2267,7 @@ export class SelfHealingManager {
           );
 
           const auditor = createRunAuditor(this.store, {
-            runId: generateSyntheticRunId("self-heal-self-defeating-dep"),
+            runId: generateSyntheticRunId("self-heal-self-defeating-dep", task.id),
             agentId: "system:self-healing",
             taskId: task.id,
             phase: "reconcile-self-defeating-dep",
