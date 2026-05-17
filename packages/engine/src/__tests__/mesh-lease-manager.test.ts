@@ -270,6 +270,7 @@ describe("MeshLeaseManager", () => {
     expect(ok).toBe(true);
     expect(taskStore.updateTask).toHaveBeenCalled();
     expect(recordRunAuditEvent.mock.calls.some((call) => call[0].mutationType === "task:auto-recover-lease-already-healed")).toBe(true);
+    expect(recordRunAuditEvent.mock.calls.some((call) => call[0].mutationType === "task:auto-recover-lease-released")).toBe(false);
   });
 
   it("returns false when central claim release remains unavailable after retry", async () => {

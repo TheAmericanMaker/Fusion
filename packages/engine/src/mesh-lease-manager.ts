@@ -402,8 +402,9 @@ export class MeshLeaseManager {
 
     // FN-4823/FN-4819 §2.5: without central claim store, retain local-only recovery behavior.
     const nextEpoch = (task.checkoutLeaseEpoch ?? 0) + 1;
+    let centralResult: "released" | "already-healed" | "foreign-owner" | "unavailable" = "released";
     if (this.options.centralClaimStore && this.options.projectId) {
-      const centralResult = await this.releaseCentralClaim(task, `${reason} (${stale.reason ?? "stale"})`, nextEpoch);
+      centralResult = await this.releaseCentralClaim(task, `${reason} (${stale.reason ?? "stale"})`, nextEpoch);
       if (centralResult === "foreign-owner" || centralResult === "unavailable") {
         return false;
       }
@@ -427,7 +428,7 @@ export class MeshLeaseManager {
       }
     }
 
-    if (this.options.centralClaimStore && this.options.projectId) {
+    if (this.options.centralClaimStore && this.options.projectId && centralResult === "released") {
       await this.emitLeaseAudit(task, "task:auto-recover-lease-released", {
         priorOwnerNodeId: task.checkoutNodeId ?? null,
         priorOwnerAgentId: task.checkedOutBy ?? null,
