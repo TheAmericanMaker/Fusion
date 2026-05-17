@@ -167,7 +167,7 @@ describe("useQuickChat", () => {
     });
   });
 
-  it("prefers done payload assistant snapshot over streamed text", async () => {
+  it("prefers accumulated streamed text over done payload snapshot when both exist", async () => {
     const session = makeSession({ id: "session-001", agentId: "agent-001" });
     mockFetchResumeChatSession.mockResolvedValue({ session });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
@@ -188,14 +188,15 @@ describe("useQuickChat", () => {
 
     act(() => {
       void result.current.sendMessage("Hello");
-      onText?.("streamed text");
+      onText?.("Quick.");
+      onText?.(" Chat.");
       onDone?.({
         messageId: "msg-002",
         message: {
           id: "msg-002",
           sessionId: "session-001",
           role: "assistant",
-          content: "snapshot wins",
+          content: "Quick.Chat.",
           thinkingOutput: null,
           metadata: null,
           createdAt: "2026-01-01T00:00:00.000Z",
@@ -206,7 +207,7 @@ describe("useQuickChat", () => {
     await waitFor(() => {
       expect(result.current.messages.at(-1)).toEqual(expect.objectContaining({
         id: "msg-002",
-        content: "snapshot wins",
+        content: "Quick. Chat.",
       }));
     });
   });

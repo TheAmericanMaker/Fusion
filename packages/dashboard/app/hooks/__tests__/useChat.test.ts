@@ -610,7 +610,23 @@ describe("useChat", () => {
     });
   });
 
-  it("prefers accumulated streamed text over done payload snapshot when both exist", async () => {
+  it.each([
+    {
+      name: "single sentence boundary",
+      chunks: ["Hello.", " World."],
+      expected: "Hello. World.",
+    },
+    {
+      name: "multiple sentence boundaries across three chunks",
+      chunks: ["One.", " Two.", " Three.", " Four."],
+      expected: "One. Two. Three. Four.",
+    },
+    {
+      name: "trailing whitespace-only delta before done",
+      chunks: ["Trailing", " "],
+      expected: "Trailing ",
+    },
+  ])("prefers streamed text over done snapshot (%s)", async ({ chunks, expected }) => {
     const session = makeSession({ id: "session-001", agentId: "agent-001" });
     mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
     mockFetchChatMessages.mockResolvedValueOnce({ messages: [] });
@@ -639,15 +655,16 @@ describe("useChat", () => {
 
     act(() => {
       result.current.sendMessage("Hello!");
-      textHandler?.("Hello.");
-      textHandler?.(" World.");
+      for (const chunk of chunks) {
+        textHandler?.(chunk);
+      }
       doneHandler?.({
         messageId: "msg-003",
         message: {
           id: "msg-003",
           sessionId: "session-001",
           role: "assistant",
-          content: "Hello.World.",
+          content: expected.replace(/\s+/g, ""),
           thinkingOutput: null,
           metadata: null,
           createdAt: "2026-01-01T00:00:00.000Z",
@@ -658,7 +675,7 @@ describe("useChat", () => {
     await waitFor(() => {
       expect(result.current.messages.at(-1)).toEqual(expect.objectContaining({
         id: "msg-003",
-        content: "Hello. World.",
+        content: expected,
       }));
     });
   });
