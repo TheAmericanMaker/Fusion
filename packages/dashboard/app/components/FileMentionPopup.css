@@ -106,6 +106,13 @@
 
 @media (max-width: 768px) {
   .file-mention-popup {
+    /* Anchored to relative chat input wrappers; bottom: 100% tracks input height on mobile. */
+    top: auto !important;
+    bottom: calc(100% + var(--space-xs));
+    left: var(--space-md) !important;
+    right: var(--space-md);
+    max-width: none;
+    width: auto;
     max-height: calc(var(--space-xl) * 8 + var(--space-sm));
   }
 
