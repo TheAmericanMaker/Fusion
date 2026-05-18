@@ -1819,20 +1819,6 @@ function TaskCardComponent({
               <ProviderIcon provider="github" size="sm" />
             </span>
           )}
-          {(showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
-            <a
-              className="card-github-tracking-chip card-github-tracking-link"
-              href={githubTrackedIssue.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={`Linked GitHub issue: ${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
-              aria-label={`Linked GitHub issue #${githubTrackedIssue.number}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ProviderIcon provider="github" size="sm" />
-              <span>{`#${githubTrackedIssue.number}`}</span>
-            </a>
-          )}
           {(task.retrySummary?.total ?? 0) > 0 && (
             <span
               className={`card-retry-badge${(retryWarningThreshold != null && (task.retrySummary?.total ?? 0) >= retryWarningThreshold) ? " card-retry-badge--error" : " card-retry-badge--warning"}`}
@@ -1852,6 +1838,20 @@ function TaskCardComponent({
               <RotateCw size={11} />
               <span>{task.retrySummary?.total ?? 0}</span>
             </span>
+          )}
+          {(showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
+            <a
+              className="card-github-tracking-chip card-github-tracking-link"
+              href={githubTrackedIssue.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`Linked GitHub issue: ${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
+              aria-label={`Linked GitHub issue #${githubTrackedIssue.number}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ProviderIcon provider="github" size="sm" />
+              <span>{`#${githubTrackedIssue.number}`}</span>
+            </a>
           )}
           {timeIndicator && (
             <span
