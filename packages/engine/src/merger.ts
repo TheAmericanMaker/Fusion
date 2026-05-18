@@ -91,6 +91,7 @@ import { detectMergeOverlap, restoreBranchWinsFiles } from "./merger-overlap-gua
 import { checkDiffVolume, DiffVolumeRegressionError } from "./merger-diff-volume-gate.js";
 import { ReadonlyViolationError, filterCustomToolsForReadonly } from "./workflow-step-tool-policy.js";
 import { detectAlreadyLandedOnMain, type AlreadyMergedDetectionStrategy } from "./already-merged-detector.js";
+import { decideAutoPrerebase, probeDivergence, runAutoPrerebase } from "./merger-auto-prerebase.js";
 
 export { DiffVolumeRegressionError } from "./merger-diff-volume-gate.js";
 
@@ -6529,6 +6530,99 @@ export async function aiMergeTask(
   // Either stage failing under prefer-main is a hard error.
   let rebaseHappened = false;
   let preferMainRebaseFailureMessage: string | undefined;
+
+  if (worktreePath && task.baseCommitSha) {
+    try {
+      throwIfAborted(options.signal, taskId);
+      const { stdout: mainHeadOut } = await execAsync("git rev-parse HEAD", {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const mainHead = mainHeadOut.trim();
+      if (mainHead) {
+        const divergence = await probeDivergence({
+          rootDir,
+          baseCommitSha: task.baseCommitSha,
+          mainRef: mainHead,
+        });
+        const prerebaseDecision = decideAutoPrerebase({
+          settings,
+          baseCommitSha: task.baseCommitSha,
+          commitsBehind: divergence.commitsBehind,
+          changedFiles: divergence.changedFiles,
+          worktrunkEnabled: settings.worktrunk?.enabled === true,
+        });
+
+        const prerebaseMetadata = {
+          reason: prerebaseDecision.reason,
+          commitsBehind: prerebaseDecision.commitsBehind,
+          hotMatches: prerebaseDecision.hotMatches,
+          baseCommitSha: task.baseCommitSha,
+          mainHead,
+          taskId,
+        };
+
+        if (!prerebaseDecision.fire) {
+          await audit.git({
+            type: "merge:auto-prerebase:skipped",
+            target: taskId,
+            metadata: prerebaseMetadata,
+          });
+        } else {
+          throwIfAborted(options.signal, taskId);
+          const prerebaseResult = await runAutoPrerebase({
+            rootDir,
+            worktreePath,
+            branch,
+            taskId,
+            mainHead,
+            logger: mergerLog,
+          });
+          if (prerebaseResult.ok) {
+            rebaseHappened = true;
+            await store.appendAgentLog(
+              taskId,
+              `Pre-merge auto-prerebase: ${branch} → local HEAD ${mainHead.slice(0, 8)} (${prerebaseDecision.reason})`,
+              "text",
+              undefined,
+              "merger",
+            );
+            await audit.git({
+              type: "merge:auto-prerebase:applied",
+              target: taskId,
+              metadata: prerebaseMetadata,
+            });
+          } else {
+            mergerLog.warn(`${taskId}: auto-prerebase failed (${prerebaseResult.error ?? "unknown"}) — proceeding to existing rebase cascade`);
+            await audit.git({
+              type: "merge:auto-prerebase:failed",
+              target: taskId,
+              metadata: {
+                ...prerebaseMetadata,
+                error: prerebaseResult.error ?? "unknown",
+              },
+            });
+          }
+        }
+      }
+    } catch (err: unknown) {
+      rethrowIfMergeAborted(err);
+      mergerLog.warn(`${taskId}: auto-prerebase probe failed (${getCommandErrorMessage(err)}) — proceeding to existing rebase cascade`);
+      await audit.git({
+        type: "merge:auto-prerebase:failed",
+        target: taskId,
+        metadata: {
+          reason: "no-divergence",
+          commitsBehind: 0,
+          hotMatches: [],
+          baseCommitSha: task.baseCommitSha,
+          mainHead: "",
+          taskId,
+          error: getCommandErrorMessage(err),
+        },
+      });
+    }
+  }
 
   // Semantic guards: prefer-main with no rebase available is incoherent —
   // the strategy depends on rebase to honor main's deletions. Fail fast
