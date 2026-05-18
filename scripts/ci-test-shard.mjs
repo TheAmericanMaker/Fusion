@@ -6,9 +6,9 @@
  * Packages are weighted by discovered test-file count. Oversized packages are
  * rewritten into virtual shard entries `{ name, shardIndex, shardCount }` so
  * one package can execute across multiple CI shards via `vitest --shard`.
- * The planner then greedily bin-packs weighted entries into the lightest shard
- * while keeping slices of the same package on different shards whenever
- * possible.
+ * The planner then uses a best-fit-decreasing strategy that packs each entry
+ * toward the per-shard budget (or minimizes overshoot when necessary), while
+ * keeping slices of the same package on different shards whenever possible.
  */
 
 import { spawnSync } from "node:child_process";
@@ -127,6 +127,11 @@ export function computeSplitPlan(packages, total, options = {}) {
 }
 
 /**
+ * Best-fit-decreasing assignment (FN-5002): iterate entries in descending
+ * weight order and place each entry into the shard that is closest to the
+ * per-shard budget without exceeding it; if all candidates would exceed budget,
+ * choose the minimum overshoot shard. Split-slice isolation rules are preserved.
+ *
  * @param {Array<{name:string, testFileCount:number}>} packages
  * @param {number} total
  * @param {{ threshold?: number }} [options]
@@ -134,6 +139,8 @@ export function computeSplitPlan(packages, total, options = {}) {
  */
 export function planShardAssignments(packages, total, options = {}) {
   const splitPlan = computeSplitPlan(packages, total, options);
+  const totalWeight = splitPlan.reduce((sum, entry) => sum + entry.weight, 0);
+  const perShardBudget = total > 0 ? totalWeight / total : 0;
   const shardAssignments = Array.from({ length: total }, () => []);
   const shardWeights = Array.from({ length: total }, () => 0);
   const sorted = [...splitPlan].sort((a, b) => {
@@ -162,9 +169,44 @@ export function planShardAssignments(packages, total, options = {}) {
     }
 
     let targetIndex = candidates[0] ?? 0;
-    for (const index of candidates) {
-      if (shardWeights[index] < shardWeights[targetIndex]) {
-        targetIndex = index;
+    if (entry.shardCount) {
+      for (const index of candidates) {
+        if (shardWeights[index] < shardWeights[targetIndex]) {
+          targetIndex = index;
+        }
+      }
+    } else {
+      let bestUnderBudgetIndex = null;
+      let bestUnderBudgetProjected = Number.NEGATIVE_INFINITY;
+      let bestOvershootIndex = null;
+      let bestOvershootProjected = Number.POSITIVE_INFINITY;
+
+      for (const index of candidates) {
+        const projected = shardWeights[index] + entry.weight;
+        if (projected <= perShardBudget) {
+          if (
+            projected > bestUnderBudgetProjected ||
+            (projected === bestUnderBudgetProjected && (bestUnderBudgetIndex === null || index < bestUnderBudgetIndex))
+          ) {
+            bestUnderBudgetIndex = index;
+            bestUnderBudgetProjected = projected;
+          }
+          continue;
+        }
+
+        if (
+          projected < bestOvershootProjected ||
+          (projected === bestOvershootProjected && (bestOvershootIndex === null || index < bestOvershootIndex))
+        ) {
+          bestOvershootIndex = index;
+          bestOvershootProjected = projected;
+        }
+      }
+
+      if (bestUnderBudgetIndex !== null) {
+        targetIndex = bestUnderBudgetIndex;
+      } else if (bestOvershootIndex !== null) {
+        targetIndex = bestOvershootIndex;
       }
     }
 

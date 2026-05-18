@@ -78,7 +78,7 @@ test("planShardAssignments: trailing shards are empty when shard count exceeds p
   assert.deepEqual(result[2], []);
 });
 
-test("planShardAssignments: greedy balancing keeps shard totals within 1", () => {
+test("planShardAssignments: best-fit balancing keeps shard totals within 1", () => {
   const packages = [
     { name: "a", testFileCount: 5 },
     { name: "b", testFileCount: 4 },
@@ -122,6 +122,96 @@ test("planShardAssignments: preserves total input weight via computeSplitPlan-de
 
   const inputWeight = packages.reduce((sum, pkg) => sum + pkg.testFileCount, 0);
   assert.equal(assignedWeight, inputWeight);
+});
+
+test("planShardAssignments: FN-5002 regression fixture keeps 4-shard variance below 2%", () => {
+  const packages = [
+    { name: "@fusion/dashboard", testFileCount: 606 },
+    { name: "@fusion/engine", testFileCount: 365 },
+    { name: "@fusion/core", testFileCount: 200 },
+    { name: "@runfusion/fusion", testFileCount: 71 },
+    { name: "filler-a", testFileCount: 39 },
+    { name: "filler-b", testFileCount: 35 },
+    { name: "filler-c", testFileCount: 31 },
+    { name: "filler-d", testFileCount: 19 },
+    { name: "filler-e", testFileCount: 18 },
+    { name: "filler-f", testFileCount: 18 },
+    { name: "filler-g", testFileCount: 17 },
+    { name: "filler-h", testFileCount: 16 },
+    { name: "filler-i", testFileCount: 15 },
+    { name: "filler-j", testFileCount: 12 },
+  ];
+
+  const shards = planShardAssignments(packages, 4);
+  const totals = shards.map((entries) => entries.reduce((sum, entry) => sum + entry.weight, 0));
+  const totalWeight = totals.reduce((sum, weight) => sum + weight, 0);
+  const perShardBudget = totalWeight / 4;
+  const varianceRatio = (Math.max(...totals) - Math.min(...totals)) / perShardBudget;
+
+  // FN-5002: this fixture previously peaked at 382 on one shard under lightest-shard placement.
+  assert.ok(varianceRatio < 0.02, `expected <2% variance but got ${(varianceRatio * 100).toFixed(2)}% (${totals.join("/")})`);
+});
+
+test("planShardAssignments: best-fit places unsplit large package on tightest under-budget shard", () => {
+  const packages = [
+    { name: "anchor", testFileCount: 290 },
+    { name: "preload", testFileCount: 220 },
+    { name: "x-large-unsplit", testFileCount: 200 },
+    { name: "near-budget", testFileCount: 170 },
+    { name: "small", testFileCount: 40 },
+    { name: "tiny", testFileCount: 30 },
+  ];
+
+  const shards = planShardAssignments(packages, 3, { threshold: Number.POSITIVE_INFINITY });
+  const targetIndex = shards.findIndex((entries) => entries.some((entry) => entry.name === "x-large-unsplit"));
+
+  assert.equal(targetIndex, 2, "best-fit should place 200-weight package onto the empty shard");
+});
+
+test("planShardAssignments: uses minimum overshoot and deterministic tie-break when all candidates exceed budget", () => {
+  const packages = [
+    { name: "gamma", testFileCount: 80 },
+    { name: "beta", testFileCount: 70 },
+    { name: "alpha", testFileCount: 60 },
+    { name: "overshoot", testFileCount: 100 },
+  ];
+
+  const first = planShardAssignments(packages, 2, { threshold: Number.POSITIVE_INFINITY });
+  const second = planShardAssignments(packages, 2, { threshold: Number.POSITIVE_INFINITY });
+
+  const overshootShard = first.findIndex((entries) => entries.some((entry) => entry.name === "overshoot"));
+  assert.equal(overshootShard, 0);
+  assert.deepEqual(first, second);
+});
+
+test("planShardAssignments: keeps split slices isolated across distinct shards", () => {
+  const packages = [
+    { name: "split-me", testFileCount: 16 },
+    { name: "small", testFileCount: 2 },
+  ];
+
+  const shards = planShardAssignments(packages, 2, { threshold: 0.5 });
+  const splitSliceShardIndices = shards
+    .map((entries, shardIndex) => ({ entries, shardIndex }))
+    .filter(({ entries }) => entries.some((entry) => entry.name === "split-me"))
+    .map(({ shardIndex }) => shardIndex);
+
+  assert.deepEqual(splitSliceShardIndices, [0, 1]);
+});
+
+test("planShardAssignments: deterministic output for repeated calls", () => {
+  const packages = [
+    { name: "p1", testFileCount: 41 },
+    { name: "p2", testFileCount: 39 },
+    { name: "p3", testFileCount: 27 },
+    { name: "p4", testFileCount: 12 },
+    { name: "p5", testFileCount: 8 },
+  ];
+
+  assert.deepEqual(
+    planShardAssignments(packages, 3, { threshold: Number.POSITIVE_INFINITY }),
+    planShardAssignments(packages, 3, { threshold: Number.POSITIVE_INFINITY }),
+  );
 });
 
 test("selectShardPackages: returns the same shard assignment as planShardAssignments", () => {
