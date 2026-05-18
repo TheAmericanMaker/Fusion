@@ -135,6 +135,8 @@ export type GitMutationType =
   | "merge:start"
   | "merge:resolve"
   | "merge:file-scope-violation"
+  | "merge:layer3:foreign-file-skipped"
+  | "merge:layer3:scope-override-bypass"
   | "merge:audit-failure"
   | "branch:auto-reclaim"
   | "branch:stale-active-reclaim"

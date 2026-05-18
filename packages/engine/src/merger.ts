@@ -2573,7 +2573,7 @@ async function tryRecoverHardFailApply(params: {
       rootDir,
       branch: task.branch || `fusion/${taskId.toLowerCase()}`,
       conflictFiles: threeWayConflicted,
-      auditor: ctx.options.auditor,
+      auditor: undefined,
     });
     const aiConflictedFiles = partitioned.inScopeConflicts;
 
@@ -3002,7 +3002,7 @@ async function restoreUnrelatedRootDirChanges(
     rootDir,
     branch: task.branch || `fusion/${taskId.toLowerCase()}`,
     conflictFiles: conflictedFiles,
-    auditor: ctx.options.auditor,
+    auditor: undefined,
   });
   const aiConflictedFiles = partitioned.inScopeConflicts;
 
@@ -4054,7 +4054,7 @@ export async function applyLayer3ConflictScopePartition(params: {
   if (outOfScope.length > 0) {
     const summary = `Layer 3 arbiter: skipped ${outOfScope.length} foreign file(s) — took main's version for: ${outOfScope.join(", ")}`;
     await store.appendAgentLog(taskId, summary, "text", undefined, "merger");
-    await store.logEntry(taskId, summary, undefined, "Layer3AIArbiterScopeSkip");
+    await store.logEntry(taskId, summary, "Layer3AIArbiterScopeSkip");
     if (auditor) {
       await auditor.git({
         type: "merge:layer3:foreign-file-skipped",
