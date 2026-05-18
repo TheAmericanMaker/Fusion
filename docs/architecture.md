@@ -700,6 +700,7 @@ Guardrails: this routine does **not** retry merges, does **not** apply to mixed/
 ### Observability and reflection
 - `AgentLogger` (`agent-logger.ts`) — structured per-agent run logging
 - `RunAudit` (`run-audit.ts`) — mutation audit tracking (DB/git/filesystem)
+  - FN-4956: Layer 3 merge-conflict arbitration now scope-partitions conflicted files before AI resolution. Out-of-scope conflicts are deterministically resolved to main (`git checkout --ours`) and unstaged, while only in-scope conflicts flow to AI. Audit events: `merge:layer3:foreign-file-skipped` and `merge:layer3:scope-override-bypass`.
 
 #### Key diagnostic points (log subsystem tags)
 - `[self-healing]` — startup/maintenance recovery pass outcomes.
