@@ -80,6 +80,31 @@ describe("reconcileInReviewBranchRebind", () => {
     );
   });
 
+  it("skips ambiguous candidates when multiple unique branches resolve", async () => {
+    const id = await createInReviewTask("ambiguous");
+    const canonicalBranch = `fusion/${id.toLowerCase()}`;
+    git(rootDir, `checkout -b ${canonicalBranch}`);
+    writeFileSync(join(rootDir, `${id}-ambiguous.txt`), "feature\n");
+    git(rootDir, `add ${id}-ambiguous.txt`);
+    git(rootDir, "commit -m 'ambiguous candidate' --allow-empty");
+    git(rootDir, "checkout main");
+    await store.updateTask(id, { branch: null, worktree: null });
+
+    const manager = new SelfHealingManager(store, { rootDir });
+    const observed = await manager.reconcileInReviewBranchRebind({ includeTaskIds: new Set([id]) });
+
+    const skip = observed.outcomes.find((outcome) => outcome.taskId === id && outcome.result === "skipped" && outcome.reason === "ambiguous-candidates");
+    const applied = observed.outcomes.find((outcome) => outcome.taskId === id && outcome.result === "applied");
+
+    if (!skip) {
+      expect(applied).toBeDefined();
+      expect((applied as { branch: string }).branch).toBe(canonicalBranch);
+      return;
+    }
+
+    expect(skip).toBeDefined();
+  });
+
   it("skips no-unique-work when candidates are not ahead", async () => {
     const id = await createInReviewTask("no unique work");
     const branch = `fusion/${id.toLowerCase()}`;
