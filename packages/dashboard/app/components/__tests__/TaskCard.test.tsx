@@ -26,6 +26,28 @@ vi.mock("../ProviderIcon", () => ({
   ProviderIcon: ({ provider }: { provider: string }) => <span data-testid={`provider-icon-${provider}`} />,
 }));
 
+vi.mock("../PrCreateModal", () => ({
+  PrCreateModal: ({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (prInfo: any) => void }) => (
+    <div data-testid="pr-create-modal" data-open={open ? "true" : "false"}>
+      <button type="button" onClick={() => onClose()}>close-pr-modal</button>
+      <button
+        type="button"
+        onClick={() => onCreated({
+          number: 42,
+          url: "https://github.com/owner/repo/pull/42",
+          status: "open",
+          title: "Created PR",
+          headBranch: "fusion/fn-001",
+          baseBranch: "main",
+          commentCount: 0,
+        })}
+      >
+        create-pr-modal
+      </button>
+    </div>
+  ),
+}));
+
 const useTaskDiffStatsMock = vi.fn(() => ({ stats: null, loading: false }));
 vi.mock("../../hooks/useTaskDiffStats", () => ({
   useTaskDiffStats: (...args: any[]) => useTaskDiffStatsMock(...args),
@@ -300,6 +322,138 @@ describe("TaskCard", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "#42" }));
     expect(onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it("renders Create PR quick action on eligible in-review cards", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "in-review", paused: false, userPaused: false, prInfo: undefined as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        prAuthAvailable={true}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Create pull request" })).toBeDefined();
+  });
+
+  it.each(["in-progress", "todo", "done"] as const)("does not render Create PR quick action outside in-review (%s)", (column) => {
+    render(
+      <TaskCard
+        task={makeTask({ column, paused: false, userPaused: false, prInfo: undefined as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        prAuthAvailable={true}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Create pull request" })).toBeNull();
+  });
+
+  it("does not render Create PR quick action when prAuthAvailable is false", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "in-review", paused: false, userPaused: false, prInfo: undefined as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        prAuthAvailable={false}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Create pull request" })).toBeNull();
+  });
+
+  it("does not render Create PR quick action when task already has prInfo", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          column: "in-review",
+          prInfo: {
+            url: "https://github.com/owner/repo/pull/7",
+            number: 7,
+            status: "open",
+            title: "Existing PR",
+            headBranch: "fusion/fn-001",
+            baseBranch: "main",
+            commentCount: 0,
+          } as any,
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+        prAuthAvailable={true}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Create pull request" })).toBeNull();
+  });
+
+  it.each([
+    { paused: true, userPaused: false },
+    { paused: false, userPaused: true },
+  ])("does not render Create PR quick action when paused flags are set", ({ paused, userPaused }) => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "in-review", paused, userPaused, prInfo: undefined as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        prAuthAvailable={true}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Create pull request" })).toBeNull();
+  });
+
+  it("opens Create PR modal on click and does not open task detail", () => {
+    const onOpenDetail = vi.fn();
+
+    render(
+      <TaskCard
+        task={makeTask({ column: "in-review", paused: false, userPaused: false, prInfo: undefined as any })}
+        onOpenDetail={onOpenDetail}
+        addToast={noop}
+        prAuthAvailable={true}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+
+    expect(screen.getByTestId("pr-create-modal").getAttribute("data-open")).toBe("true");
+    expect(onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it("closes Create PR modal when onClose fires", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "in-review", paused: false, userPaused: false, prInfo: undefined as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        prAuthAvailable={true}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+    fireEvent.click(screen.getByRole("button", { name: "close-pr-modal" }));
+
+    expect(screen.getByTestId("pr-create-modal").getAttribute("data-open")).toBe("false");
+  });
+
+  it("shows success toast and closes modal when PR is created", () => {
+    const addToast = vi.fn();
+
+    render(
+      <TaskCard
+        task={makeTask({ column: "in-review", paused: false, userPaused: false, prInfo: undefined as any })}
+        onOpenDetail={noop}
+        addToast={addToast}
+        prAuthAvailable={true}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+    fireEvent.click(screen.getByRole("button", { name: "create-pr-modal" }));
+
+    expect(addToast).toHaveBeenCalledWith("Created PR #42", "success");
+    expect(screen.getByTestId("pr-create-modal").getAttribute("data-open")).toBe("false");
   });
 
   it("renders GitHub badge from live websocket data even when task payload has no badge fields", () => {
@@ -3284,6 +3438,17 @@ describe("TaskCard provider icons on agent row", () => {
 });
 
 describe("TaskCard memo comparator provenance behavior", () => {
+  it("returns false when prAuthAvailable changes", () => {
+    const task = makeTask({ column: "in-review" });
+
+    expect(
+      __test_areTaskCardPropsEqual(
+        { task, onOpenDetail: noop, addToast: noop, prAuthAvailable: false } as any,
+        { task, onOpenDetail: noop, addToast: noop, prAuthAvailable: true } as any,
+      ),
+    ).toBe(false);
+  });
+
   it("returns false when disableDrag changes", () => {
     const task = makeTask();
 
