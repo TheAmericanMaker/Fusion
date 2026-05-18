@@ -570,8 +570,24 @@ See [Task Management → Branch conflict recovery](./task-management.md#branch-c
 
 ### GitHub integration
 
+Create a pull request for a task with `fn pr create <task-id>`.
+
+Alias: `fn task pr-create <task-id>`
+
+Flags:
+- `--title <title>`: Set the PR title.
+- `--base <branch>`: Target base branch (default from repo/CLI settings).
+- `--body <body>`: Set the PR body.
+- `--draft`: Create the PR as a draft.
+- `--no-ai`: Disable AI-generated PR title/body fallback.
+- `--reviewer <login>`: Request a reviewer by GitHub login (repeatable for multiple reviewers).
+
+Default behavior: PR title/body are AI-generated unless both `--title` and `--body` are provided. Use `--no-ai` to suppress AI generation.
+
 ```bash
-fn task pr-create FN-001 --title "Fix login race" --base main
+fn pr create FN-001
+fn pr create FN-001 --draft --reviewer octocat --reviewer hubot --base main
+fn task pr-create FN-001 --title "Fix login race" --body "Prevents duplicate session refresh." --base main
 fn task import owner/repo --labels bug --limit 10
 fn task import owner/repo --interactive
 ```
