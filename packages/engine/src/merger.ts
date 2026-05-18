@@ -3927,6 +3927,27 @@ export function matchesScope(filePath: string, scopePatterns: string[]): boolean
   return false;
 }
 
+export function partitionConflictsByFileScope(params: {
+  conflictFiles: string[];
+  declaredScope: string[];
+}): { inScope: string[]; outOfScope: string[] } {
+  const { conflictFiles, declaredScope } = params;
+  if (declaredScope.length === 0) {
+    return { inScope: [...conflictFiles], outOfScope: [] };
+  }
+
+  const inScope: string[] = [];
+  const outOfScope: string[] = [];
+  for (const file of conflictFiles) {
+    if (matchesScope(file, declaredScope)) {
+      inScope.push(file);
+    } else {
+      outOfScope.push(file);
+    }
+  }
+  return { inScope, outOfScope };
+}
+
 /**
  * Validate that the diff stays within the task's declared File Scope.
  * Returns warnings for out-of-scope changes, especially large deletions.
