@@ -88,7 +88,7 @@ Fusion automatically falls back to ntfy's JSON publish format when a notificatio
 | `settingsSyncConflictResolution` | `"last-write-wins" \| "always-ask" \| "keep-local" \| "keep-remote"` | `"last-write-wins"` | Conflict strategy for divergent synced settings. |
 | `secretsAccessPolicy` | `"auto" \| "prompt" \| "deny"` | `undefined` | Global default secret access policy used when a secret row does not set `access_policy`; resolver fallback remains `"prompt"`. |
 | `secretsEnv` | `{ enabled?: boolean; filename?: string; overwritePolicy?: "skip" \| "merge" \| "replace"; keyPrefix?: string; requireGitignored?: boolean }` | `undefined` | Reserved secrets env-materialization settings block. Planned integration (FN-4867); currently not active in this branch. |
-| `secretsSyncPassphrase` | `string` | `undefined` | Reserved shared-passphrase setting for cross-node secrets sync. Planned integration (FN-4867); currently not active in this branch. |
+| `secretsSyncPassphraseConfigured` | `boolean` | `false` | Read-only probe indicating whether a shared cross-node secrets-sync passphrase has been provisioned in `secrets_global` (`~/.fusion/fusion-central.db`). The plaintext passphrase is never exposed via settings. See [Secrets](./secrets.md). |
 | `owningNodeHandoffPolicy` | `"block" \| "reassign-to-local" \| "reassign-any-healthy"` | `"reassign-to-local"` | Global fallback policy for tasks whose owning checkout node is unavailable. Project-level `owningNodeHandoffPolicy` overrides this. |
 | `dashboardCurrentNodeId` | `string` | `undefined` | Currently selected dashboard node ID. Restores the last-viewed node on fresh browser/PWA sessions. `undefined` means viewing the local node. |
 
