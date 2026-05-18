@@ -817,18 +817,22 @@ describe("TaskStore", () => {
       await expect(store.moveTask(task.id, "in-review")).rejects.toThrow("Invalid transition");
     });
 
-    it("moveTask from triage → archived should fail", async () => {
+    it("moveTask from triage → archived should succeed", async () => {
       const task = await store.createTask({ description: "Test task" });
       // Task starts in triage
 
-      await expect(store.moveTask(task.id, "archived")).rejects.toThrow("Invalid transition");
+      await store.moveTask(task.id, "archived");
+      const updated = await store.getTask(task.id);
+      expect(updated.column).toBe("archived");
     });
 
-    it("moveTask from todo → archived should fail", async () => {
+    it("moveTask from todo → archived should succeed", async () => {
       const task = await store.createTask({ description: "Test task" });
       await store.moveTask(task.id, "todo");
 
-      await expect(store.moveTask(task.id, "archived")).rejects.toThrow("Invalid transition");
+      await store.moveTask(task.id, "archived");
+      const updated = await store.getTask(task.id);
+      expect(updated.column).toBe("archived");
     });
 
     it("moveTask from in-progress → archived should fail", async () => {
