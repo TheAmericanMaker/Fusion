@@ -56,6 +56,7 @@ interface AppModalsProps {
     moveTask: (taskId: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
     deleteTask: (taskId: string, options?: { removeDependencyReferences?: boolean; githubIssueAction?: GithubIssueAction }) => Promise<Task>;
     mergeTask: (taskId: string) => Promise<MergeResult>;
+    archiveTask: (taskId: string) => Promise<Task>;
     retryTask: (taskId: string) => Promise<Task>;
     resetTask: (taskId: string) => Promise<Task>;
     duplicateTask: (taskId: string) => Promise<Task>;
@@ -171,6 +172,7 @@ export function AppModals({
             onMoveTask={taskOperations.moveTask}
             onDeleteTask={taskOperations.deleteTask}
             onMergeTask={taskOperations.mergeTask}
+            onArchiveTask={taskOperations.archiveTask}
             onRetryTask={taskOperations.retryTask}
             onResetTask={taskOperations.resetTask}
             onDuplicateTask={taskOperations.duplicateTask}

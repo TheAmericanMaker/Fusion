@@ -284,6 +284,7 @@ export interface TaskDetailModalProps {
   onOpenDetail: (task: Task | TaskDetail) => void; // For clicking dependencies
   onMoveTask: (id: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
   onDeleteTask: (id: string, options?: { removeDependencyReferences?: boolean; githubIssueAction?: GithubIssueAction }) => Promise<Task>;
+  onArchiveTask?: (id: string) => Promise<Task>;
   onMergeTask: (id: string) => Promise<MergeResult>;
   onRetryTask?: (id: string) => Promise<Task>;
   onResetTask?: (id: string) => Promise<Task>;
@@ -454,6 +455,7 @@ export function TaskDetailContent({
   onOpenDetail,
   onMoveTask,
   onDeleteTask,
+  onArchiveTask,
   onMergeTask,
   onRetryTask,
   onResetTask,
@@ -1310,7 +1312,7 @@ export function TaskDetailContent({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { nodes } = useNodes();
-  const { confirm } = useConfirm();
+  const { confirm, confirmWithChoice } = useConfirm();
 
   const handleUnlinkGithubIssue = useCallback(async () => {
     if (!canEdit || !githubTrackedIssue || isSavingGithubTracking) return;
@@ -1401,12 +1403,36 @@ export function TaskDetailContent({
   );
 
   const handleDelete = useCallback(async () => {
-    const shouldDelete = await confirm({
-      title: "Delete Task",
-      message: `Delete ${task.id}?`,
-      danger: true,
-    });
-    if (!shouldDelete) return;
+    if (task.column === "done" && onArchiveTask) {
+      const deleteChoice = await confirmWithChoice({
+        title: "Delete Task",
+        message: `Delete ${task.id}?`,
+        confirmLabel: "Delete",
+        cancelLabel: "Cancel",
+        tertiaryLabel: "Archive Instead",
+        danger: true,
+      });
+      if (deleteChoice === "tertiary") {
+        try {
+          await onArchiveTask(task.id);
+          addToast(`Archived ${task.id}`, "success");
+          requestClose();
+        } catch (err) {
+          addToast(getErrorMessage(err), "error");
+        }
+        return;
+      }
+      if (deleteChoice !== "primary") {
+        return;
+      }
+    } else {
+      const shouldDelete = await confirm({
+        title: "Delete Task",
+        message: `Delete ${task.id}?`,
+        danger: true,
+      });
+      if (!shouldDelete) return;
+    }
 
     const trackedIssue = task.githubTracking?.enabled === true ? task.githubTracking.issue : undefined;
     let githubIssueAction: GithubIssueAction | undefined;
@@ -1471,7 +1497,7 @@ export function TaskDetailContent({
         addToast(getErrorMessage(retryErr), "error");
       }
     }
-  }, [task.githubTracking?.enabled, task.githubTracking?.issue, task.id, onDeleteTask, requestClose, addToast, confirm]);
+  }, [task.column, task.githubTracking?.enabled, task.githubTracking?.issue, task.id, onDeleteTask, onArchiveTask, requestClose, addToast, confirm, confirmWithChoice]);
 
   const handleMerge = useCallback(async () => {
     const shouldMerge = await confirm({

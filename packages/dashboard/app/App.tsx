@@ -1923,7 +1923,7 @@ function AppInner() {
           handleSubtaskTasksCreated,
           handleGitHubImport,
         }}
-        taskOperations={{ moveTask, deleteTask, mergeTask, retryTask, resetTask, duplicateTask }}
+        taskOperations={{ moveTask, deleteTask, mergeTask, archiveTask, retryTask, resetTask, duplicateTask }}
         deepLink={{ handleDetailClose }}
         settings={{ prAuthAvailable, themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct }}
         onSettingsClose={handleSettingsClose}

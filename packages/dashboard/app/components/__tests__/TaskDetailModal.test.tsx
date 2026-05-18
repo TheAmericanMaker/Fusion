@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   makeTask,
@@ -9,6 +9,7 @@ import {
   noopMove,
   noopOpenDetail,
   setupTaskDetailModalHooks,
+  mockConfirmWithChoice,
 } from "./TaskDetailModal.test-helpers";
 import { TaskDetailModal } from "../TaskDetailModal";
 
@@ -84,6 +85,39 @@ describe("TaskDetailModal GitHub tracking CTA", () => {
     await user.click(screen.getByRole("button", { name: "Expand GitHub tracking details" }));
     expect(screen.getByRole("button", { name: "Create tracking issue" })).toBeEnabled();
     expect(screen.queryByText("Tracking issue will be created once this task has a title or description to summarize.")).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailModal delete affordance", () => {
+  it("archives done task when Archive Instead is chosen", async () => {
+    const user = userEvent.setup();
+    const onArchiveTask = vi.fn(async () => makeTask({ column: "archived" }));
+    const onDeleteTask = vi.fn(async () => makeTask());
+    const onClose = vi.fn();
+    mockConfirmWithChoice.mockResolvedValueOnce("tertiary");
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ column: "done" })}
+        onClose={onClose}
+        onMoveTask={noopMove}
+        onDeleteTask={onDeleteTask}
+        onArchiveTask={onArchiveTask}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(mockConfirmWithChoice).toHaveBeenCalledWith(expect.objectContaining({ tertiaryLabel: "Archive Instead" }));
+      expect(onArchiveTask).toHaveBeenCalledWith("FN-099");
+      expect(onDeleteTask).not.toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 });
 
