@@ -112,6 +112,10 @@
   background: color-mix(in srgb, var(--card) 88%, transparent);
 }
 
+.pr-create-modal__chip--colored {
+  background: color-mix(in srgb, var(--pr-chip-label-color, var(--card)) 25%, transparent);
+}
+
 .pr-create-modal__chip-remove {
   min-width: 0;
   min-height: 0;
