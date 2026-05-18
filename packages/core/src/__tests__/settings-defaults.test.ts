@@ -40,4 +40,16 @@ describe("settings defaults invariants", () => {
       }),
     ).toBe(true);
   });
+
+  describe("recycleWorktrees default", () => {
+    it("keeps recycleWorktrees explicitly false in project defaults", () => {
+      expect(DEFAULT_PROJECT_SETTINGS.recycleWorktrees).toBe(false);
+      expect("recycleWorktrees" in DEFAULT_PROJECT_SETTINGS).toBe(true);
+    });
+
+    it("keeps recycleWorktrees project-scoped only", () => {
+      // recycleWorktrees intentionally has no DEFAULT_GLOBAL_SETTINGS counterpart.
+      expect("recycleWorktrees" in DEFAULT_GLOBAL_SETTINGS).toBe(false);
+    });
+  });
 });
