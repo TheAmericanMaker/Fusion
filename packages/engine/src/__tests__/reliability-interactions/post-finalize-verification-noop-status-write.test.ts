@@ -121,7 +121,6 @@ describe("post-finalize verification noop status-write guard", () => {
     const inReviewTask = makeTask({ verificationFailureCount: failureCount });
     const doneTask = makeTask({
       column: "done",
-      status: null,
       verificationFailureCount: failureCount,
       mergeDetails: { mergeConfirmed: true, commitSha: "abcdef1234567890" },
     });
