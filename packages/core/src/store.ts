@@ -5190,14 +5190,34 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         return task;
       }
 
+      if (status === "done") {
+        for (let i = 0; i < stepIndex; i++) {
+          const priorStatus = task.steps[i].status;
+          if (priorStatus === "pending" || priorStatus === "in-progress") {
+            const ts = new Date().toISOString();
+            task.updatedAt = ts;
+            task.log.push({
+              timestamp: ts,
+              action:
+                `Ignored out-of-order ${status} for step ${stepIndex} (${task.steps[stepIndex].name}) — ` +
+                `earlier step ${i} (${task.steps[i].name}) is still ${priorStatus}`,
+            });
+            await this.atomicWriteTaskJson(dir, task);
+            if (this.isWatching) this.taskCache.set(id, { ...task });
+            this.emit("task:updated", task);
+            return task;
+          }
+        }
+      }
+
       task.steps[stepIndex].status = status;
       task.updatedAt = new Date().toISOString();
 
-      // Advance currentStep to first non-done step
+      // Advance currentStep to first non-done/non-skipped step
       if (status === "done") {
         while (
           task.currentStep < task.steps.length &&
-          task.steps[task.currentStep].status === "done"
+          (task.steps[task.currentStep].status === "done" || task.steps[task.currentStep].status === "skipped")
         ) {
           task.currentStep++;
         }
