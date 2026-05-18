@@ -2981,6 +2981,17 @@ export interface ProjectSettings {
    *  idle non-ephemeral agents available. Warning fires only when todo is strictly
    *  greater than this threshold. Default: 20. */
   capacityRiskTodoThreshold?: number;
+  /** Enables scheduler backlog-pressure imbalance alerts. Default: true. */
+  backlogPressureAlertEnabled?: boolean;
+  /** Todo/max(In-Progress,1) ratio above which backlog pressure alerting triggers.
+   *  Must be a positive finite number. Default: 10. */
+  backlogPressureRatioThreshold?: number;
+  /** Minimum todo inventory required before backlog pressure alerting can trigger.
+   *  Must be a positive finite number. Default: 5. */
+  backlogPressureMinTodoCount?: number;
+  /** Minimum cooldown in milliseconds between backlog-pressure alerts.
+   *  Default: 24 * 60 * 60_000. */
+  backlogPressureAlertCooldownMs?: number;
   /** TTL in milliseconds for persisted AI planning/subtask/mission interview sessions.
    *  Sessions older than this cutoff are expired by the dashboard session cleanup loop.
    *  Valid range: 600000 (10 minutes) to 2592000000 (30 days).

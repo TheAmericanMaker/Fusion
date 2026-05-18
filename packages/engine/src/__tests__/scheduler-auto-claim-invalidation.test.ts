@@ -13,6 +13,7 @@ function createStore() {
   const store = {
     on,
     off: vi.fn(),
+    getRootDir: vi.fn().mockReturnValue("/test/project"),
   } as unknown as TaskStore;
 
   const emit = (event: string, payload: unknown) => {

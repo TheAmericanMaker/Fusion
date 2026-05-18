@@ -332,6 +332,10 @@ Default notes:
 | `staleHighFanoutBlockerAgeThresholdMs` | `number` | `7200000` | Age threshold (ms) before high-fan-out blockers escalate in dashboard task cards/footer. Applies only to blockers currently in `in-progress`/`in-review`; age is computed from `columnMovedAt ?? updatedAt`. |
 | `capacityRiskBannerEnabled` | `boolean` | `false` | Opt-in gate for the board-level capacity-risk banner. When enabled, the banner is shown once risk conditions are met and can be dismissed per project. |
 | `capacityRiskTodoThreshold` | `number` | `20` | Todo threshold for the board-level capacity-risk banner (applies when `capacityRiskBannerEnabled` is true). Warning appears only when `todoCount > capacityRiskTodoThreshold` **and** there are zero idle non-ephemeral agents, auto-clears as soon as an idle agent becomes available or todo falls back to threshold/below, and re-arms after threshold/toggle changes. |
+| `backlogPressureAlertEnabled` | `boolean` | `true` | Enables the scheduler backlog-pressure imbalance detector; set `false` to disable insight/log emission. |
+| `backlogPressureRatioThreshold` | `number` | `10` | Alert threshold for `todoCount / max(inProgressCount, 1)`; alerts only when ratio is strictly greater than this value. |
+| `backlogPressureMinTodoCount` | `number` | `5` | Minimum Todo inventory required before backlog-pressure detection can fire. |
+| `backlogPressureAlertCooldownMs` | `number` | `86400000` | Minimum cooldown between backlog-pressure alerts (default 24h). |
 | `aiSessionTtlMs` | `number` | `604800000` | TTL in ms for persisted planning/subtask/mission sessions (7 days). |
 | `aiSessionCleanupIntervalMs` | `number` | `3600000` | Interval in ms for AI session cleanup sweeps (1 hour). |
 | `autoUnpauseEnabled` | `boolean` | `true` | Auto-unpause after rate-limit-triggered pauses; manual pauses stay paused until explicitly unpaused by the user. |
@@ -387,6 +391,13 @@ Default notes:
 | `taskEvaluationFollowUpPolicy` | `"off" \| "suggest" \| "create"` | `"off"` | Legacy flat eval key. Prefer `evalSettings.followUpPolicy`. |
 | `taskEvaluationRetention` | `number` | `undefined` | Legacy flat eval key. Prefer `evalSettings.retentionDays`. |
 | `memoryEnabled` | `boolean` | `true` | Enable project memory integration. |
+
+### Backlog-pressure alerts
+
+- Detection condition: `todoCount >= backlogPressureMinTodoCount` **and** `todoCount / max(inProgressCount, 1) > backlogPressureRatioThreshold`.
+- Surfacing: emits a project insight (`category="workflow"`, title `Backlog pressure detected YYYY-MM-DD`) whose `content` is a JSON string containing counts, ratio, ISO `detectedAt`, and candidate tasks; if `InsightStore` is unavailable it falls back to writing the same JSON payload into `store.logEntry(...)` for the top candidate task.
+- Cooldown semantics: alerts are suppressed for `backlogPressureAlertCooldownMs` (default `86400000`), and same-day detections upsert the existing day-bucket insight idempotently.
+- Disable by setting `backlogPressureAlertEnabled: false`.
 | `memoryBackendType` | `string` | `"qmd"` | Memory backend type. Built-ins include `qmd` (Quantized Memory Distillation, default), `file`, and `readonly`; custom backends can also be registered. |
 | `memoryAutoSummarizeEnabled` | `boolean` | `false` | Enable automatic memory summarization when memory exceeds threshold. |
 | `memoryAutoSummarizeThresholdChars` | `number` | `50000` | Character threshold for auto-summarization. |

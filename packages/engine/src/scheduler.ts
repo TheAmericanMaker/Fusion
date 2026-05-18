@@ -29,6 +29,7 @@ import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { selectPermanentAgentForTask } from "./agent-assignment.js";
 import type { AutoClaimSnapshotManager } from "./auto-claim-snapshot.js";
 import { StaleTaskReporter } from "./stale-task-reporter.js";
+import { BacklogPressureReporter } from "./backlog-pressure-reporter.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 
 /**
@@ -281,7 +282,9 @@ export class Scheduler {
   /** Tracks dispatch-queued reason signatures to avoid per-tick log spam. */
   private wasDispatchQueuedReasonLogged = new Set<string>();
   private readonly staleTaskReporter: StaleTaskReporter;
+  private readonly backlogPressureReporter: BacklogPressureReporter;
   private lastStaleTaskReportAt = 0;
+  private lastBacklogPressureReportAt = 0;
   private readonly lastHighOverlapFanoutWarningKey = new Map<string, string>();
 
   /**
@@ -296,6 +299,11 @@ export class Scheduler {
     private options: SchedulerOptions = {},
   ) {
     this.staleTaskReporter = new StaleTaskReporter({ store: this.store });
+    this.backlogPressureReporter = new BacklogPressureReporter({
+      store: this.store,
+      projectId: this.store.getRootDir(),
+      logger: schedulerLog,
+    });
     /**
      * Event-driven scheduling: when a task is created, trigger a scheduling
      * pass immediately instead of waiting for the next poll interval.
@@ -1397,6 +1405,16 @@ export class Scheduler {
           this.lastStaleTaskReportAt = Date.now();
         } catch (error) {
           schedulerLog.warn("Stale task reporter failed", error);
+        }
+      }
+
+      if (settings.backlogPressureAlertEnabled !== false && Date.now() - this.lastBacklogPressureReportAt >= 60_000) {
+        try {
+          await this.backlogPressureReporter.report();
+        } catch (error) {
+          schedulerLog.warn("Backlog pressure reporter failed", error);
+        } finally {
+          this.lastBacklogPressureReportAt = Date.now();
         }
       }
     } catch (err) {

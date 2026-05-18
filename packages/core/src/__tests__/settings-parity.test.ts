@@ -184,6 +184,28 @@ describe("settings key parity", () => {
     expect(isGlobalSettingsKey("capacityRiskBannerEnabled")).toBe(false);
   });
 
+  it("keeps backlog pressure alert settings project-scoped with documented defaults", () => {
+    expect(DEFAULT_PROJECT_SETTINGS.backlogPressureAlertEnabled).toBe(true);
+    expect(DEFAULT_PROJECT_SETTINGS.backlogPressureRatioThreshold).toBe(10);
+    expect(DEFAULT_PROJECT_SETTINGS.backlogPressureMinTodoCount).toBe(5);
+    expect(DEFAULT_PROJECT_SETTINGS.backlogPressureAlertCooldownMs).toBe(24 * 60 * 60_000);
+
+    expect(PROJECT_SETTINGS_KEYS).toContain("backlogPressureAlertEnabled");
+    expect(PROJECT_SETTINGS_KEYS).toContain("backlogPressureRatioThreshold");
+    expect(PROJECT_SETTINGS_KEYS).toContain("backlogPressureMinTodoCount");
+    expect(PROJECT_SETTINGS_KEYS).toContain("backlogPressureAlertCooldownMs");
+
+    expect(isProjectSettingsKey("backlogPressureAlertEnabled")).toBe(true);
+    expect(isProjectSettingsKey("backlogPressureRatioThreshold")).toBe(true);
+    expect(isProjectSettingsKey("backlogPressureMinTodoCount")).toBe(true);
+    expect(isProjectSettingsKey("backlogPressureAlertCooldownMs")).toBe(true);
+
+    expect(isGlobalSettingsKey("backlogPressureAlertEnabled")).toBe(false);
+    expect(isGlobalSettingsKey("backlogPressureRatioThreshold")).toBe(false);
+    expect(isGlobalSettingsKey("backlogPressureMinTodoCount")).toBe(false);
+    expect(isGlobalSettingsKey("backlogPressureAlertCooldownMs")).toBe(false);
+  });
+
   it("keeps github tracking keys in expected scopes with documented defaults", () => {
     expect(DEFAULT_PROJECT_SETTINGS.githubTrackingEnabledByDefault).toBe(false);
     expect(DEFAULT_PROJECT_SETTINGS.githubTrackingDefaultRepo).toBeUndefined();

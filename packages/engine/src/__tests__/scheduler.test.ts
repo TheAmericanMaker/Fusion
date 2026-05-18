@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { schedulerLog } from "../logger.js";
 
 const staleReporterReportMock = vi.fn();
+const backlogPressureReporterReportMock = vi.fn();
 
 // Mock fs modules
 vi.mock("node:fs", async (importOriginal) => {
@@ -42,6 +43,12 @@ vi.mock("../logger.js", () => ({
 vi.mock("../stale-task-reporter.js", () => ({
   StaleTaskReporter: vi.fn().mockImplementation(() => ({
     report: staleReporterReportMock,
+  })),
+}));
+
+vi.mock("../backlog-pressure-reporter.js", () => ({
+  BacklogPressureReporter: vi.fn().mockImplementation(() => ({
+    report: backlogPressureReporterReportMock,
   })),
 }));
 
@@ -162,6 +169,7 @@ describe("filterPathsByIgnoreList", () => {
 describe("Scheduler", () => {
   beforeEach(() => {
     staleReporterReportMock.mockReset().mockResolvedValue({ surfaced: 0 });
+    backlogPressureReporterReportMock.mockReset().mockResolvedValue({ alerted: false });
   });
   // Helper to create mock MissionStore (shared across mission-related test suites)
   function createMockMissionStore(overrides = {}) {
@@ -245,6 +253,57 @@ describe("Scheduler", () => {
         await scheduler.schedule();
         await scheduler.schedule();
         expect(staleReporterReportMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("backlog pressure reporter integration", () => {
+    it("invokes reporter from schedule when enabled", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-05-18T12:00:00.000Z"));
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+        const store = createMockStore({
+          listTasks: vi.fn().mockResolvedValue([createMockTask({ id: "FN-BACKLOG", column: "todo", dependencies: [] })]),
+          getSettings: vi.fn().mockResolvedValue({
+            maxConcurrent: 2,
+            maxWorktrees: 4,
+            staleInProgressWarningMs: 0,
+            staleInReviewWarningMs: 0,
+          }),
+        });
+        const scheduler = new Scheduler(store);
+        (scheduler as unknown as { running: boolean }).running = true;
+        await scheduler.schedule();
+        expect(backlogPressureReporterReportMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not invoke reporter when disabled", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-05-18T12:00:00.000Z"));
+        vi.mocked(existsSync).mockReturnValue(true);
+        vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+        const store = createMockStore({
+          listTasks: vi.fn().mockResolvedValue([createMockTask({ id: "FN-BACKLOG", column: "todo", dependencies: [] })]),
+          getSettings: vi.fn().mockResolvedValue({
+            maxConcurrent: 2,
+            maxWorktrees: 4,
+            backlogPressureAlertEnabled: false,
+            staleInProgressWarningMs: 0,
+            staleInReviewWarningMs: 0,
+          }),
+        });
+        const scheduler = new Scheduler(store);
+        (scheduler as unknown as { running: boolean }).running = true;
+        await scheduler.schedule();
+        expect(backlogPressureReporterReportMock).not.toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }

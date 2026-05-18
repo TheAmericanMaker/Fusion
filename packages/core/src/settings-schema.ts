@@ -290,6 +290,10 @@ export const DEFAULT_PROJECT_SETTINGS = {
   // Capacity risk warning default: only warn once todo is meaningfully backlogged.
   capacityRiskBannerEnabled: false,
   capacityRiskTodoThreshold: 20,
+  backlogPressureAlertEnabled: true,
+  backlogPressureRatioThreshold: 10,
+  backlogPressureMinTodoCount: 5,
+  backlogPressureAlertCooldownMs: 24 * 60 * 60_000,
   staleHighFanoutBlockerAgeThresholdMs: 2 * 60 * 60 * 1000,
   staleInProgressWarningMs: 4 * 60 * 60_000,
   staleInProgressCriticalMs: 24 * 60 * 60_000,
