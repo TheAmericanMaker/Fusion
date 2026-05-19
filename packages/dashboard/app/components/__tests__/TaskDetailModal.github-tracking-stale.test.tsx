@@ -59,6 +59,112 @@ describe("TaskDetailModal GitHub tracking stale await guards (FN-5148)", () => {
     expect(screen.getByLabelText("Enabling GitHub tracking")).toBeInTheDocument();
   });
 
+  it("ignores stale repo-override save result after navigating to another task", async () => {
+    const user = userEvent.setup();
+    const onTaskUpdated = vi.fn();
+
+    let resolveUpdate!: (value: any) => void;
+    const deferred = new Promise((resolve) => {
+      resolveUpdate = resolve;
+    });
+
+    const { updateTask } = await import("../../api");
+    const mockUpdateTask = vi.mocked(updateTask);
+    mockUpdateTask.mockImplementationOnce(() => deferred as any);
+
+    const taskA = makeTask({ id: "FN-A", title: "A", column: "todo", githubTracking: { enabled: false } });
+    const taskB = makeTask({ id: "FN-B", title: "B", column: "todo", githubTracking: { enabled: false } });
+
+    const { rerender } = render(
+      <TaskDetailModal
+        task={taskA}
+        onClose={() => {}}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        onTaskUpdated={onTaskUpdated}
+        addToast={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Expand GitHub tracking details" }));
+    const repoInput = screen.getByPlaceholderText("owner/repo");
+    await user.type(repoInput, "octo/demo");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    rerender(
+      <TaskDetailModal
+        task={taskB}
+        onClose={() => {}}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        onTaskUpdated={onTaskUpdated}
+        addToast={() => {}}
+      />,
+    );
+
+    resolveUpdate({ ...taskA, githubTracking: { enabled: false, repoOverride: "octo/demo" } });
+
+    await waitFor(() => {
+      expect(onTaskUpdated).not.toHaveBeenCalledWith(expect.objectContaining({ id: "FN-A" }));
+    });
+  });
+
+  it("ignores stale create-tracking-issue retry result after navigating to another task", async () => {
+    const user = userEvent.setup();
+    const onTaskUpdated = vi.fn();
+
+    let resolveUpdate!: (value: any) => void;
+    const deferred = new Promise((resolve) => {
+      resolveUpdate = resolve;
+    });
+
+    const { updateTask } = await import("../../api");
+    const mockUpdateTask = vi.mocked(updateTask);
+    mockUpdateTask.mockImplementationOnce(() => deferred as any);
+
+    const taskA = makeTask({ id: "FN-A", title: "A", column: "todo", githubTracking: { enabled: true } });
+    const taskB = makeTask({ id: "FN-B", title: "B", column: "todo", githubTracking: { enabled: false } });
+
+    const { rerender } = render(
+      <TaskDetailModal
+        task={taskA}
+        onClose={() => {}}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        onTaskUpdated={onTaskUpdated}
+        addToast={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Expand GitHub tracking details" }));
+    await user.click(screen.getByRole("button", { name: "Create tracking issue" }));
+
+    rerender(
+      <TaskDetailModal
+        task={taskB}
+        onClose={() => {}}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        onTaskUpdated={onTaskUpdated}
+        addToast={() => {}}
+      />,
+    );
+
+    resolveUpdate({ ...taskA, githubTracking: { enabled: true } });
+
+    await waitFor(() => {
+      expect(onTaskUpdated).not.toHaveBeenCalledWith(expect.objectContaining({ id: "FN-A" }));
+    });
+  });
+
   it("applies enable-tracking result when still viewing the same task", async () => {
     const user = userEvent.setup();
     const onTaskUpdated = vi.fn();
