@@ -25,6 +25,7 @@ import { BackwardCompat, ProjectRequiredError } from "./migration.js";
 import { CentralCore } from "./central-core.js";
 import { SecretsStore } from "./secrets-store.js";
 import { MasterKeyManager } from "./master-key.js";
+import { hasSyncPassphraseConfigured } from "./secrets-sync-passphrase.js";
 import { getTaskMergeBlocker, resolveTaskMergeTarget } from "./task-merge.js";
 import { getInReviewStallReason } from "./in-review-stall.js";
 import { getStalePausedReviewSignal } from "./stale-paused-review.js";
@@ -2343,6 +2344,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         (projectSettings as Partial<Settings>).worktrunk,
       ),
     };
+    try {
+      merged.secretsSyncPassphraseConfigured = await hasSyncPassphraseConfigured(await this.getSecretsStore());
+    } catch {
+      merged.secretsSyncPassphraseConfigured = false;
+    }
     return canonicalizeSettings(merged);
   }
 
@@ -2382,6 +2388,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ...projectSettings,
       worktrunk: resolveWorktrunkSettings(globalSettings.worktrunk, projectSettings?.worktrunk),
     };
+    try {
+      merged.secretsSyncPassphraseConfigured = await hasSyncPassphraseConfigured(await this.getSecretsStore());
+    } catch {
+      merged.secretsSyncPassphraseConfigured = false;
+    }
 
     return canonicalizeSettings(merged);
   }
@@ -2398,6 +2409,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       this.globalSettingsStore.getSettings(),
       this.readConfig(),
     ]);
+    try {
+      globalSettings.secretsSyncPassphraseConfigured = await hasSyncPassphraseConfigured(await this.getSecretsStore());
+    } catch {
+      globalSettings.secretsSyncPassphraseConfigured = false;
+    }
 
     // Extract only project-level keys from config.settings
     const projectSettings: Partial<ProjectSettings> = {};
@@ -2435,6 +2451,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       this.globalSettingsStore.getSettings(),
       this.db.prepare("SELECT settings FROM config WHERE id = 1").get() as { settings?: string } | undefined,
     ]);
+    try {
+      globalSettings.secretsSyncPassphraseConfigured = await hasSyncPassphraseConfigured(await this.getSecretsStore());
+    } catch {
+      globalSettings.secretsSyncPassphraseConfigured = false;
+    }
 
     const projectSettings = row?.settings ? fromJson<Settings>(row.settings) : undefined;
 
@@ -2567,6 +2588,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const previous: Settings = { ...DEFAULT_SETTINGS, ...previousGlobal, ...config.settings } as Settings;
 
     const globalPatch: Partial<GlobalSettings> = { ...patch };
+    delete globalPatch.secretsSyncPassphraseConfigured;
 
     // Handle deep merge + targeted null clear semantics for remoteAccess
     const incomingRemoteAccess = (globalPatch as Record<string, unknown>)["remoteAccess"];
@@ -2609,6 +2631,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const updatedGlobal = await this.globalSettingsStore.updateSettings(globalPatch);
     const merged: Settings = { ...DEFAULT_SETTINGS, ...updatedGlobal, ...config.settings } as Settings;
+    try {
+      merged.secretsSyncPassphraseConfigured = await hasSyncPassphraseConfigured(await this.getSecretsStore());
+    } catch {
+      merged.secretsSyncPassphraseConfigured = false;
+    }
 
     // Emit settings:updated so SSE listeners pick up the change
     this.emit("settings:updated", { settings: merged, previous });

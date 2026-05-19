@@ -100,6 +100,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   persistAgentThinkingLog: false,
   agentMemoryInclusionMode: "full",
   secretsAccessPolicy: undefined,
+  secretsSyncPassphraseConfigured: false,
   researchGlobalDefaults: {
     searchProvider: undefined,
     synthesisProvider: undefined,
@@ -200,7 +201,6 @@ export const DEFAULT_PROJECT_SETTINGS = {
   owningNodeHandoffPolicy: "reassign-to-local",
   defaultNodeId: undefined,
   secretsEnv: undefined,
-  secretsSyncPassphrase: undefined,
   worktreeInitCommand: undefined,
   testCommand: undefined,
   buildCommand: undefined,

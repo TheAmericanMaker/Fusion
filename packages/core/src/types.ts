@@ -2150,6 +2150,11 @@ export interface GlobalSettings {
    *  "prompt" (route through approvals), or "deny" (reject without prompt).
    *  Default when unset: "prompt". */
   secretsAccessPolicy?: SecretAccessPolicy;
+  /** Read-only derived probe for cross-node secrets sync passphrase state.
+   * Mirrors `hasSyncPassphraseConfigured(secretsStore)` against the reserved
+   * `__sync_passphrase__` row in `secrets_global`. Never includes plaintext and
+   * cannot be persisted via `updateSettings` / `updateGlobalSettings`. */
+  secretsSyncPassphraseConfigured?: boolean;
   /** Policy for recovering tasks whose existing owning node becomes unavailable. */
   owningNodeHandoffPolicy?: OwningNodeHandoffPolicy;
   /** How long a task must remain in `status='failed'` before a push notification fires.
@@ -2624,16 +2629,6 @@ export interface ProjectSettings {
   researchSettings?: ResearchProjectSettings;
   /** Optional per-project `.env` materialization settings for exportable secrets. */
   secretsEnv?: SecretsEnvSettings;
-  /**
-   * Encrypted shared-passphrase blob used for cross-node secrets sync.
-   * The stored value MUST already be ciphertext wrapped under the local
-   * master key by the caller/settings writer; the settings store does not
-   * automatically wrap this field.
-   *
-   * This value MUST NEVER be transmitted over the network; only derived
-   * sync envelopes may cross the wire.
-   */
-  secretsSyncPassphrase?: string;
   /** Sandbox command-execution settings.
    *  When omitted, runtime behavior is preserved via native passthrough defaults. */
   sandbox?: SandboxProjectSettings;
