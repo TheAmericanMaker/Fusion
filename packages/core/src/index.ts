@@ -226,9 +226,13 @@ export {
 export type { CapacityRiskSignal } from "./capacity.js";
 export {
   computeDependencyBlockedTodoReport,
+  DEFAULT_DEPENDENCY_BLOCKED_TODO_FRESH_MS,
+  DEFAULT_DEPENDENCY_BLOCKED_TODO_STALE_MS,
+  DEFAULT_DEPENDENCY_BLOCKED_TODO_MIN_COUNT,
   DEFAULT_DEPENDENCY_BLOCKED_TODO_MAX_GROUPS,
 } from "./dependency-blocked-todo-report.js";
 export type {
+  DependencyBlockedTodoCode,
   DependencyBlockedTodoGroup,
   DependencyBlockedTodoReport,
   DependencyBlockedTodoReportContext,
