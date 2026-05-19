@@ -25,6 +25,7 @@ import {
   formatRoleMismatchReason,
   getCurrentRepo,
   findDuplicateMatches,
+  deterministicGuardLocks,
   runDeterministicDuplicateGuard,
   reconcileDeterministicDuplicate,
 } from "@fusion/core";
@@ -40,6 +41,8 @@ const REVIEW_BLOCK_RE = /##\s+(Code|Plan)\s+Review:[\s\S]*?(?=\n##\s+(?:Code|Pla
 const REVIEW_VERDICT_RE = /###\s+Verdict:\s*(APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const REVIEW_STEP_RE = /^(plan|code) review Step (\d+): (APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const DUPLICATE_STOPWORDS = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "is", "on", "with", "fn"]);
+
+export const __fingerprintCreateLocksForTests = deterministicGuardLocks;
 
 function buildDuplicateQuery(title: string | undefined, description: string): string {
   const tokens = `${title ?? ""} ${description}`

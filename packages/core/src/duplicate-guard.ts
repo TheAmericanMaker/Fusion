@@ -4,7 +4,7 @@ import { computeContentFingerprint } from "./duplicate-detection.js";
 
 const DEFAULT_WINDOW_MS = 60_000;
 const MAX_WINDOW_MS = 300_000;
-const deterministicGuardLocks = new Map<string, Promise<void>>();
+export const deterministicGuardLocks = new Map<string, Promise<void>>();
 
 // Test-only compatibility hook used by dashboard deterministic-dedup route tests.
 export const __deterministicGuardLocksForTests = deterministicGuardLocks;
@@ -59,7 +59,8 @@ export async function runDeterministicDuplicateGuard(
         return { action: "duplicate", fingerprint, existing: deterministicConflict, releaseLock: noop };
       }
     } catch (error) {
-      opts?.logger?.warn("Deterministic duplicate pre-check failed; proceeding", {
+      opts?.logger?.warn("FN-5084 deterministic pre-check failed; proceeding", {
+        contentFingerprint: fingerprint,
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -69,7 +70,16 @@ export async function runDeterministicDuplicateGuard(
   const lockKey = `${opts.lockScope}:${fingerprint}`;
   const existingLock = deterministicGuardLocks.get(lockKey);
   if (existingLock) {
-    await existingLock;
+    try {
+      await existingLock;
+    } catch (error) {
+      opts?.logger?.warn("FN-5084 deterministic lock wait failed; proceeding", {
+        lockKey,
+        contentFingerprint: fingerprint,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      deterministicGuardLocks.delete(lockKey);
+    }
   }
 
   let releaseCalled = false;
@@ -98,8 +108,9 @@ export async function runDeterministicDuplicateGuard(
       return { action: "duplicate", fingerprint, existing: deterministicConflict, releaseLock };
     }
   } catch (error) {
-    opts?.logger?.warn("Deterministic duplicate pre-check failed; proceeding", {
+    opts?.logger?.warn("FN-5084 deterministic pre-check failed; proceeding", {
       lockKey,
+      contentFingerprint: fingerprint,
       error: error instanceof Error ? error.message : String(error),
     });
   }

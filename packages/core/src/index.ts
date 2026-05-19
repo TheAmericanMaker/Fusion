@@ -141,6 +141,7 @@ export {
 export { getTaskDuplicateLineage } from "./duplicate-lineage.js";
 export {
   __getDeterministicGuardMutexSize,
+  deterministicGuardLocks,
   runDeterministicDuplicateGuard,
   reconcileDeterministicDuplicate,
   __deterministicGuardLocksForTests,
