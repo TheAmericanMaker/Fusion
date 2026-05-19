@@ -6310,10 +6310,22 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         action: "Task archived",
       });
 
+      let rewrittenLineageChildren: Task[] = [];
+
       if (!cleanup) {
+        this.db.transaction(() => {
+          rewrittenLineageChildren = this.rewriteLineageChildrenForRemoval(id, lineageChildIds);
+          this.clearLinkedAgentTaskIds(id, task.updatedAt);
+          if (rewrittenLineageChildren.length > 0) {
+            this.db.bumpLastModified();
+          }
+        });
+
         await this.atomicWriteTaskJson(dir, task);
-        this.clearLinkedAgentTaskIds(id, task.updatedAt);
         if (this.isWatching) this.taskCache.set(id, { ...task });
+        for (const lineageChild of rewrittenLineageChildren) {
+          this.emit("task:updated", lineageChild);
+        }
         this.emit("task:moved", { task, from: "done" as Column, to: "archived" as Column, source: "engine" });
         return task;
       }
@@ -6329,7 +6341,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const entry = await this.taskToArchiveEntry(task, task.columnMovedAt);
       this.archiveDb.upsert(entry);
 
-      let rewrittenLineageChildren: Task[] = [];
       this.db.transaction(() => {
         rewrittenLineageChildren = this.rewriteLineageChildrenForRemoval(id, lineageChildIds);
         this.clearLinkedAgentTaskIds(id, task.updatedAt);
