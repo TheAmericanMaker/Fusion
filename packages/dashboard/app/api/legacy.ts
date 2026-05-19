@@ -106,6 +106,7 @@ export class ApiRequestError extends Error {
   }
 }
 
+/** Options that shape the soft-delete request payload/query, not hard-delete behavior. */
 export interface DeleteTaskOptions {
   removeDependencyReferences?: boolean;
   githubIssueAction?: GithubIssueAction;
@@ -502,6 +503,15 @@ export function moveTask(
   });
 }
 
+/**
+ * Soft-deletes a task by setting `deletedAt` server-side while preserving the row/artifacts,
+ * and keeping the task ID reserved.
+ *
+ * `removeDependencyReferences` allows forced delete by first removing incoming dependency links.
+ * `githubIssueAction` controls linked issue behavior (`close`, `delete`, or `leave`) during deletion.
+ *
+ * Hard removal is handled only by the archive-cleanup pipeline (after archival), not this endpoint.
+ */
 export function deleteTask(id: string, projectId?: string, options?: DeleteTaskOptions): Promise<Task> {
   const search = new URLSearchParams();
   if (options?.removeDependencyReferences) {
