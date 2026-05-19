@@ -502,6 +502,14 @@ export class Scheduler {
         this.options.prMonitor.startMonitoring(task.id, repo.owner, repo.repo, task.prInfo);
       }
     });
+
+    this.store.on("task:deleted", (task) => {
+      this.options.snapshotManager?.invalidate("task:deleted");
+      this.pausedTaskIds.delete(task.id);
+      this.failedTaskIds.delete(task.id);
+      this.wasNodeDispatchValidationBlocked.delete(task.id);
+      this.wasNodeBlocked.delete(task.id);
+    });
   }
 
   /**
