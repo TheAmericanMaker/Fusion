@@ -35,7 +35,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
 import { canonicalFusionBranchName } from "./worktree-names.js";
-import { BranchAttributionError, filterFilesToOwnTaskCommits } from "./branch-attribution.js";
+import { filterFilesToOwnTaskCommits } from "./branch-attribution.js";
 import { hostname } from "node:os";
 import {
   buildTaskLineageTrailer,
@@ -5126,7 +5126,7 @@ function parseShortstatSummary(statsOutput: string): { filesChanged: number; ins
  * per-commit (instead of range-based) so rebased/cherry-picked SHAs do not
  * require contiguous ancestry assumptions.
  */
-async function sumShortstatsForCommits(
+export async function sumShortstatsForCommits(
   rootDir: string,
   ownCommitShas: string[],
 ): Promise<{ insertions: number; deletions: number }> {
@@ -5143,6 +5143,78 @@ async function sumShortstatsForCommits(
     deletions += parsed.deletions;
   }
   return { insertions, deletions };
+}
+
+export async function captureRebaseLandedFilesForTask(params: {
+  rootDir: string;
+  rebaseMergeBaseSha: string;
+  recordedSha: string;
+  taskId: string;
+  onAttributionFailure?: (message: string) => Promise<void> | void;
+  attributionExecAsyncImpl?: (command: string, options: { cwd?: string; encoding?: BufferEncoding; maxBuffer?: number }) => Promise<{ stdout: string; stderr: string }>;
+}): Promise<{
+  landedFiles: string[];
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  noOpVerifiedShortCircuit?: boolean;
+  landedFilesAttributionRestricted?: boolean;
+  landedFilesCaptureFallback?: MergeDetails["landedFilesCaptureFallback"];
+}> {
+  const { rootDir, rebaseMergeBaseSha, recordedSha, taskId, onAttributionFailure, attributionExecAsyncImpl } = params;
+  try {
+    const attribution = await filterFilesToOwnTaskCommits({
+      worktreePath: rootDir,
+      baseRef: rebaseMergeBaseSha,
+      taskId,
+      execAsyncImpl: attributionExecAsyncImpl as any,
+    });
+    if (attribution.ownCommitCount === 0) {
+      return {
+        landedFiles: [],
+        filesChanged: 0,
+        insertions: 0,
+        deletions: 0,
+        noOpVerifiedShortCircuit: true,
+        landedFilesAttributionRestricted: true,
+      };
+    }
+
+    const landedFiles = attribution.files;
+    const stats = await sumShortstatsForCommits(rootDir, attribution.ownCommitShas ?? []);
+    return {
+      landedFiles,
+      filesChanged: landedFiles.length,
+      insertions: stats.insertions,
+      deletions: stats.deletions,
+      landedFilesAttributionRestricted: true,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (onAttributionFailure) {
+      await onAttributionFailure(message);
+    }
+    const { stdout: landedFilesOutput } = await execAsync(
+      `git diff --name-only ${quoteArg(`${rebaseMergeBaseSha}..${recordedSha}`)}`,
+      { cwd: rootDir, encoding: "utf-8", maxBuffer: 2 * 1024 * 1024 },
+    );
+    const landedFiles = landedFilesOutput
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const { stdout: statsOutput } = await execAsync(`git diff --shortstat ${quoteArg(`${rebaseMergeBaseSha}..HEAD`)}`, {
+      cwd: rootDir,
+      encoding: "utf-8",
+    });
+    const parsed = parseShortstatSummary(statsOutput);
+    return {
+      landedFiles: landedFiles.length > 0 ? Array.from(new Set(landedFiles)) : [],
+      filesChanged: parsed.filesChanged,
+      insertions: parsed.insertions,
+      deletions: parsed.deletions,
+      landedFilesCaptureFallback: "attribution-failed",
+    };
+  }
 }
 
 function parseDirectMergeCommitStrategyOverride(prompt: string | undefined): DirectMergeCommitStrategy | undefined {
@@ -7927,62 +7999,31 @@ export async function aiMergeTask(
     if (!isEmptyCommit && !mergeWasEmpty && recordedSha) {
       try {
         if (rebaseMergeBaseSha) {
-          try {
-            const attribution = await filterFilesToOwnTaskCommits({
-              worktreePath: rootDir,
-              baseRef: rebaseMergeBaseSha,
-              taskId,
-            });
-            landedFilesAttributionRestricted = true;
-            if (attribution.ownCommitCount === 0) {
-              landedFiles = [];
-              filesChanged = 0;
-              insertions = 0;
-              deletions = 0;
-              noOpVerifiedShortCircuit = true;
-              mergerLog.log(`${taskId}: rebase-strategy landed-files capture: zero own commits — verified-short-circuit (rebase walked ${attribution.foreignCommits.length} foreign commits)`);
-            } else {
-              landedFiles = attribution.files;
-              filesChanged = landedFiles.length;
-              const stats = await sumShortstatsForCommits(rootDir, attribution.ownCommitShas ?? []);
-              insertions = stats.insertions;
-              deletions = stats.deletions;
-            }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            const attributionErrorType = error instanceof BranchAttributionError ? "BranchAttributionError" : "Error";
-            mergerLog.warn(`${taskId}: landed-files attribution failed (${attributionErrorType}), falling back to full-range capture (${message})`);
-            await store.appendAgentLog(
-              taskId,
-              `merger: landed-files attribution failed, falling back to full-range capture (${message})`,
-              "text",
-              undefined,
-              "merger",
-            );
-            landedFilesCaptureFallback = "attribution-failed";
-
-            const { stdout: landedFilesOutput } = await execAsync(
-              `git diff --name-only ${quoteArg(`${rebaseMergeBaseSha}..${recordedSha}`)}`,
-              {
-                cwd: rootDir,
-                encoding: "utf-8",
-                maxBuffer: 2 * 1024 * 1024,
-              },
-            );
-            const parsedLandedFiles = landedFilesOutput
-              .split(/\r?\n/)
-              .map((line) => line.trim())
-              .filter(Boolean);
-            landedFiles = parsedLandedFiles.length > 0 ? Array.from(new Set(parsedLandedFiles)) : undefined;
-
-            const { stdout: statsOutput } = await execAsync(`git diff --shortstat ${quoteArg(`${rebaseMergeBaseSha}..HEAD`)}`, {
-              cwd: rootDir,
-              encoding: "utf-8",
-            });
-            const parsed = parseShortstatSummary(statsOutput);
-            filesChanged = parsed.filesChanged;
-            insertions = parsed.insertions;
-            deletions = parsed.deletions;
+          const capture = await captureRebaseLandedFilesForTask({
+            rootDir,
+            rebaseMergeBaseSha,
+            recordedSha,
+            taskId,
+            onAttributionFailure: async (message) => {
+              mergerLog.warn(`${taskId}: landed-files attribution failed (Error), falling back to full-range capture (${message})`);
+              await store.appendAgentLog(
+                taskId,
+                `merger: landed-files attribution failed, falling back to full-range capture (${message})`,
+                "text",
+                undefined,
+                "merger",
+              );
+            },
+          });
+          landedFiles = capture.landedFiles;
+          filesChanged = capture.filesChanged;
+          insertions = capture.insertions;
+          deletions = capture.deletions;
+          noOpVerifiedShortCircuit = capture.noOpVerifiedShortCircuit;
+          landedFilesAttributionRestricted = capture.landedFilesAttributionRestricted;
+          landedFilesCaptureFallback = capture.landedFilesCaptureFallback;
+          if (capture.noOpVerifiedShortCircuit) {
+            mergerLog.log(`${taskId}: rebase-strategy landed-files capture: zero own commits — verified-short-circuit`);
           }
         } else {
           const { stdout: landedFilesOutput } = await execAsync(`git show --name-only --format= ${quoteArg(recordedSha)}`, {

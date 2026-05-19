@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
+import { captureRebaseLandedFilesForTask, sumShortstatsForCommits } from "../../merger.js";
 import { filterFilesToOwnTaskCommits } from "../../branch-attribution.js";
 
 const hasGit = spawnSync("git", ["--version"], { stdio: "pipe" }).status === 0;
@@ -63,8 +64,14 @@ describeIfGit("FN-5103 reliability interaction: landed-files attribution", () =>
     expect(attribution.files).toEqual(["task-a.ts", "task-b.ts", "task-c.ts"]);
     expect(attribution.ownCommitCount).toBe(3);
     expect(attribution.foreignCommits.length).toBe(5);
-    expect(attribution.ownCommitShas).toHaveLength(3);
-    expect(new Set(attribution.ownCommitShas ?? []).size).toBe(3);
+    const stats = await sumShortstatsForCommits(repoDir, attribution.ownCommitShas ?? []);
+    expect(stats.insertions).toBeGreaterThan(0);
+    expect(stats.deletions).toBeGreaterThanOrEqual(0);
+    const capture = await captureRebaseLandedFilesForTask({ rootDir: repoDir, rebaseMergeBaseSha: baseSha, recordedSha: git(repoDir, "git rev-parse HEAD"), taskId });
+    expect(capture.landedFiles).toEqual(["task-a.ts", "task-b.ts", "task-c.ts"]);
+    expect(capture.filesChanged).toBe(3);
+    expect(capture.landedFilesAttributionRestricted).toBe(true);
+    expect(capture.noOpVerifiedShortCircuit).toBeUndefined();
     expect([own1, own2, own3]).toHaveLength(3);
   });
 
@@ -76,10 +83,12 @@ describeIfGit("FN-5103 reliability interaction: landed-files attribution", () =>
     git(repoDir, `git checkout -b fusion/${taskId.toLowerCase()}`);
     await commitFile(repoDir, "foreign-only.ts", "x\n", "feat(FN-OTHER): foreign", "FN-OTHER");
 
-    const attribution = await filterFilesToOwnTaskCommits({ worktreePath: repoDir, baseRef: baseSha, taskId });
-    expect(attribution.files).toEqual([]);
-    expect(attribution.ownCommitCount).toBe(0);
-    expect(attribution.foreignCommits.length).toBe(1);
+    const capture = await captureRebaseLandedFilesForTask({ rootDir: repoDir, rebaseMergeBaseSha: baseSha, recordedSha: git(repoDir, "git rev-parse HEAD"), taskId });
+    expect(capture.landedFiles).toEqual([]);
+    expect(capture.noOpVerifiedShortCircuit).toBe(true);
+    expect(capture.filesChanged).toBe(0);
+    expect(capture.insertions).toBe(0);
+    expect(capture.deletions).toBe(0);
   });
 
   it("surfaces attribution failure when git reads fail", async () => {
@@ -90,18 +99,18 @@ describeIfGit("FN-5103 reliability interaction: landed-files attribution", () =>
     git(repoDir, `git checkout -b fusion/${taskId.toLowerCase()}`);
     await commitFile(repoDir, "task-owned.ts", "owned\n", "feat(FN-5103): own", taskId);
 
-    await expect(
-      filterFilesToOwnTaskCommits({
-        worktreePath: repoDir,
-        baseRef: baseSha,
-        taskId,
-        execAsyncImpl: async () => {
-          throw new Error("forced attribution failure");
-        },
-      }),
-    ).rejects.toMatchObject({
-      name: "BranchAttributionError",
-      message: expect.stringContaining("forced attribution failure"),
+    const capture = await captureRebaseLandedFilesForTask({
+      rootDir: repoDir,
+      rebaseMergeBaseSha: baseSha,
+      recordedSha: git(repoDir, "git rev-parse HEAD"),
+      taskId,
+      attributionExecAsyncImpl: async () => {
+        throw new Error("forced attribution failure");
+      },
     });
+
+    expect(capture.landedFilesCaptureFallback).toBe("attribution-failed");
+    expect(capture.landedFiles).toEqual(["task-owned.ts"]);
+    expect(capture.filesChanged).toBe(1);
   });
 });
