@@ -5718,7 +5718,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    */
   async deleteTask(
     id: string,
-    options?: { removeDependencyReferences?: boolean; githubIssueAction?: GithubIssueAction },
+    options?: {
+      removeDependencyReferences?: boolean;
+      removeLineageReferences?: boolean;
+      githubIssueAction?: GithubIssueAction;
+    },
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
       // Flush buffered agent logs inside the lock so no new appends for this
@@ -5741,6 +5745,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         throw new TaskHasDependentsError(id, dependentIds);
       }
 
+      // FN-5127: lineage gate must execute after idempotent short-circuit.
+      const lineageChildIds = this.findLiveLineageChildren(id);
+      if (lineageChildIds.length > 0 && !options?.removeLineageReferences) {
+        throw new TaskHasLineageChildrenError(id, lineageChildIds);
+      }
+
       // Clean up the task's branch before deleting from DB
       const cleanedBranches = await this.cleanupBranchForTask(task);
       if (cleanedBranches.length > 0) {
@@ -5752,8 +5762,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
 
       let rewrittenDependents: Task[] = [];
+      let rewrittenLineageChildren: Task[] = [];
       this.db.transaction(() => {
         rewrittenDependents = this.rewriteDependentsForRemoval(id, dependentIds);
+        rewrittenLineageChildren = this.rewriteLineageChildrenForRemoval(id, lineageChildIds);
         const deletedAt = new Date().toISOString();
         this.db.prepare("UPDATE tasks SET deletedAt = ?, updatedAt = ? WHERE id = ?").run(deletedAt, deletedAt, id);
         this.clearLinkedAgentTaskIds(id, deletedAt);
@@ -5765,6 +5777,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
       for (const dependentTask of rewrittenDependents) {
         this.emit("task:updated", dependentTask);
+      }
+      for (const lineageChild of rewrittenLineageChildren) {
+        this.emit("task:updated", lineageChild);
       }
 
       const linkedFeature = this.missionStore?.getFeatureByTaskId(id);
@@ -5813,6 +5828,29 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     return rewrittenDependents;
+  }
+
+  private rewriteLineageChildrenForRemoval(parentId: string, childIds: string[]): Task[] {
+    const rewrittenChildren: Task[] = [];
+
+    for (const childId of childIds) {
+      const childTask = this.readTaskFromDb(childId);
+      if (!childTask || childTask.sourceParentTaskId !== parentId) continue;
+
+      const updatedChild: Task = {
+        ...childTask,
+        sourceParentTaskId: undefined,
+        updatedAt: new Date().toISOString(),
+      };
+
+      this.db.prepare("UPDATE tasks SET sourceParentTaskId = NULL, updatedAt = ? WHERE id = ?").run(updatedChild.updatedAt, updatedChild.id);
+      if (this.isWatching) {
+        this.taskCache.set(updatedChild.id, updatedChild);
+      }
+      rewrittenChildren.push(updatedChild);
+    }
+
+    return rewrittenChildren;
   }
 
   /**
