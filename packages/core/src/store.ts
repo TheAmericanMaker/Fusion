@@ -8805,6 +8805,10 @@ ${stepsSection}`;
     return this.db;
   }
 
+  getBootstrappedAt(): number | null {
+    return this.db.getBootstrappedAt();
+  }
+
   async getSecretsStore(): Promise<SecretsStore> {
     if (this.secretsStore) {
       return this.secretsStore;

@@ -310,6 +310,21 @@ describe("Database", () => {
       expect(ts).toBeLessThanOrEqual(Date.now());
     });
 
+    it("seeds bootstrappedAt and preserves it across reopen", () => {
+      const bootstrappedAt = db.getBootstrappedAt();
+      expect(bootstrappedAt).toBeTypeOf("number");
+      expect(bootstrappedAt).toBeGreaterThan(0);
+      expect(bootstrappedAt).toBeLessThanOrEqual(Date.now());
+
+      const reopened = new Database(tempDir);
+      reopened.init();
+      try {
+        expect(reopened.getBootstrappedAt()).toBe(bootstrappedAt);
+      } finally {
+        reopened.close();
+      }
+    });
+
     it("seeds config row with all required fields", () => {
       const row = db.prepare("SELECT * FROM config WHERE id = 1").get() as any;
       expect(row).toBeDefined();

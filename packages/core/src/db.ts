@@ -1520,6 +1520,9 @@ export class Database {
     this.db.exec(
       `INSERT OR IGNORE INTO __meta (key, value) VALUES ('lastModified', '${Date.now()}')`,
     );
+    this.db.exec(
+      `INSERT OR IGNORE INTO __meta (key, value) VALUES ('bootstrappedAt', '${Date.now()}')`,
+    );
 
     // Run schema migrations
     this.migrate();
@@ -3845,6 +3848,15 @@ export class Database {
     this.db.prepare("UPDATE __meta SET value = ? WHERE key = 'lastModified'").run(
       String(next),
     );
+  }
+
+  getBootstrappedAt(): number | null {
+    const value = this.getMetaValue("bootstrappedAt");
+    if (!value) {
+      return null;
+    }
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   /**
