@@ -59,7 +59,7 @@ export async function runDeterministicDuplicateGuard(
         return { action: "duplicate", fingerprint, existing: deterministicConflict, releaseLock: noop };
       }
     } catch (error) {
-      opts?.logger?.warn("FN-5084 deterministic pre-check failed; proceeding", {
+      opts?.logger?.warn("Deterministic duplicate pre-check failed; proceeding", {
         contentFingerprint: fingerprint,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -73,7 +73,7 @@ export async function runDeterministicDuplicateGuard(
     try {
       await existingLock;
     } catch (error) {
-      opts?.logger?.warn("FN-5084 deterministic lock wait failed; proceeding", {
+      opts?.logger?.warn("Deterministic duplicate pre-check failed; proceeding", {
         lockKey,
         contentFingerprint: fingerprint,
         error: error instanceof Error ? error.message : String(error),
@@ -108,7 +108,7 @@ export async function runDeterministicDuplicateGuard(
       return { action: "duplicate", fingerprint, existing: deterministicConflict, releaseLock };
     }
   } catch (error) {
-    opts?.logger?.warn("FN-5084 deterministic pre-check failed; proceeding", {
+    opts?.logger?.warn("Deterministic duplicate pre-check failed; proceeding", {
       lockKey,
       contentFingerprint: fingerprint,
       error: error instanceof Error ? error.message : String(error),

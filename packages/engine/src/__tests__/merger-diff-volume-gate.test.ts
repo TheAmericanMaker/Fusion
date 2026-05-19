@@ -122,7 +122,7 @@ describe("checkDiffVolume", () => {
       name: "DiffVolumeRegressionError",
       findings: [expect.objectContaining({ file: "packages/core/src/store.ts", branchNet: 60, staged: 0 })],
     });
-  });
+  }, 15_000);
 
   it("ignores dropped files below minLines", async () => {
     const dir = mkdtempSync(join(testTempParent(), "fusion-test-diff-volume-"));

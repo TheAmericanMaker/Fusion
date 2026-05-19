@@ -96,10 +96,11 @@ describe("POST /api/tasks/:id/recover-branch-binding", () => {
   it("returns 404 even when self-healing manager is provided", async () => {
     const store = new MockStore();
     store.addTask(makeTask({ id: "FN-2" }));
+    const reconcile = vi.fn().mockResolvedValue({ repaired: 1, outcomes: [] });
     const app = createServer(store as any, {
       selfHealingManager: {
         rootDir: "/tmp/fn-5083",
-        reconcileInReviewBranchRebind: vi.fn().mockResolvedValue({ repaired: 1, outcomes: [] }),
+        reconcileInReviewBranchRebind: reconcile,
       },
     });
     const { request } = await import("../test-request.js");

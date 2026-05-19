@@ -72,19 +72,30 @@ function extractAttributedTaskId(body: string): string | null {
  * Accepts any uppercase-letter task prefix (FN, KB, RF, PROJ, JIRA, ...) so this is
  * project-agnostic. Returns the canonical `<PREFIX>-<digits>` string.
  */
-function extractTaskIdFromSubject(subject: string): string | null {
-  if (!subject) return null;
+function extractTaskIdFromSubject(subject: string): {
+  attributedTaskId: string | null;
+  source: Extract<AttributionSource, "subject-prefix" | "bracketed-prefix" | "none">;
+} {
+  if (!subject) {
+    return { attributedTaskId: null, source: "none" };
+  }
   // Conventional commit: feat(FN-123): ... or fix(FN-123)!: ... (case-insensitive)
   const conventional =
     /^(?:feat|fix|test|chore|docs|refactor|perf|build|ci|style|revert)\s*\(([A-Z]+-\d+)\)!?:/i.exec(subject);
-  if (conventional?.[1]) return conventional[1].toUpperCase();
+  if (conventional?.[1]) {
+    return { attributedTaskId: conventional[1].toUpperCase(), source: "subject-prefix" };
+  }
   // Bracketed: [FN-123] ...
   const bracketed = /^\s*\[([A-Z]+-\d+)\]/i.exec(subject);
-  if (bracketed?.[1]) return bracketed[1].toUpperCase();
+  if (bracketed?.[1]) {
+    return { attributedTaskId: bracketed[1].toUpperCase(), source: "bracketed-prefix" };
+  }
   // Legacy colon: FN-123: ...
   const colon = /^\s*([A-Z]+-\d+):/i.exec(subject);
-  if (colon?.[1]) return colon[1].toUpperCase();
-  return null;
+  if (colon?.[1]) {
+    return { attributedTaskId: colon[1].toUpperCase(), source: "subject-prefix" };
+  }
+  return { attributedTaskId: null, source: "none" };
 }
 
 function taskIdsMatch(a: string | null, b: string): boolean {
@@ -142,13 +153,25 @@ export async function filterFilesToOwnTaskCommits(opts: BranchAttributionOptions
     // FN-5083/FN-5060 hotfix: trailer is primary; fall back to subject parsing so
     // commits without the `Fusion-Task-Id` trailer (the common case for agent-driven
     // commits today) still attribute correctly by their conventional-commit subject.
-    const subjectAttributedTaskId = trailerAttributedTaskId ? null : extractTaskIdFromSubject(subject);
-    const attributedTaskId = trailerAttributedTaskId ?? subjectAttributedTaskId;
+    const subjectAttribution = trailerAttributedTaskId
+      ? { attributedTaskId: null, source: "none" as const }
+      : extractTaskIdFromSubject(subject);
+    const attributedTaskId = trailerAttributedTaskId ?? subjectAttribution.attributedTaskId;
+    const source: AttributionSource = trailerAttributedTaskId ? "trailer" : subjectAttribution.source;
+
+    commitAttributions.push({
+      sha,
+      subject,
+      source,
+      attributed: taskIdsMatch(attributedTaskId, opts.taskId),
+      attributedTaskId,
+    });
+
     if (taskIdsMatch(attributedTaskId, opts.taskId)) {
       ownCommitShas.push(sha);
       continue;
     }
-    foreignCommits.push({ sha, subject, attributedTaskId: attribution.attributedTaskId });
+    foreignCommits.push({ sha, subject, attributedTaskId });
   }
 
   for (const sha of ownCommitShas) {
