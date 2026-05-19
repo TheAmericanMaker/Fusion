@@ -236,6 +236,15 @@ User-initiated `moveTask(in-progress → todo)` is a hard cancel: executor liste
 
 `TaskExecutor` run mutation context is now keyed per task (`currentRunContexts: Map<taskId, RunMutationContext>`), not a single shared mutable field. This prevents FN-4987-style cross-task audit attribution leaks where one task's `runId` appeared in another task's `scope-leak`/`fn_task_done` logs.
 
+### Process supervision
+
+Verification or managed child processes that must die with their parent should use `superviseSpawn(...)` from `@fusion/core`, not raw `nohup … &` or ad-hoc `spawn(..., { detached: true })` patterns.
+On POSIX, `superviseSpawn` gives the child its own process group and cascades `SIGTERM` → `SIGKILL` on parent exit, signal, uncaught exception, unhandled rejection, or `maxLifetimeMs` expiry.
+On Windows, it falls back to direct child tracking/kills; grandchildren remain subject to platform limits.
+Sanctioned user-facing daemons that intentionally outlive the caller may keep `detached: true`, but must carry a preceding `// process-supervisor-allowlist: <reason>` marker.
+`eslint.config.mjs` bans raw detached spawns without that marker under `packages/**` and `scripts/**`.
+`scripts/check-no-nohup.mjs` runs in root `pretest` / `pretest:full` and blocks committed `nohup` tokens under `packages/**` and `scripts/**`.
+
 ## Git Conventions
 
 - Commit messages: `feat(FN-XXX):`, `fix(FN-XXX):`, `test(FN-XXX):`

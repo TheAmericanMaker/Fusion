@@ -21,6 +21,17 @@ Operator interpretation:
 - `ageBucket: "aging"` → review blocker progress.
 - `ageBucket: "stale"` → emerging stall; escalate/unblock blocker.
 
+## Process supervisor (`[process-supervisor]`)
+
+The process supervisor logs when it registers a supervised child, starts teardown, expires the grace window, escalates to `SIGKILL`, or observes a natural child exit.
+
+- `spawned pid=<pid> pgid=<pgid|n/a> command=<cmd>` — child registered for parent-death supervision.
+- `terminating pid=<pid> pgid=<pgid|n/a> reason=<reason>` — teardown cascade started.
+- `grace expired for pid=<pid>; escalating to SIGKILL` — child ignored the grace window.
+- `sent SIGKILL to pid=<pid> pgid=<pgid|n/a>` — hard-kill escalation sent.
+- `maxLifetime exceeded for pid=<pid> after <ms>ms` — lifetime watchdog fired.
+- `child pid=<pid> exited naturally code=<n|null> signal=<n|null>` — child deregistered after exit.
+
 ## Self-healing surfacing passes (`[self-healing]`)
 
 - `surface-in-review-stalls`
