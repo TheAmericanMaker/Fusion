@@ -7352,10 +7352,21 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return task;
   }
 
+  private hasActiveTask(taskId: string): boolean {
+    const row = this.db.prepare(`SELECT id FROM tasks WHERE id = ? AND ${TaskStore.ACTIVE_TASKS_WHERE}`).get(taskId) as
+      | { id: string }
+      | undefined;
+    return Boolean(row);
+  }
+
   /**
    * List all current task documents for a task, ordered by key.
    */
   async getTaskDocuments(taskId: string): Promise<TaskDocument[]> {
+    if (!this.hasActiveTask(taskId)) {
+      return [];
+    }
+
     const rows = this.db
       .prepare("SELECT * FROM task_documents WHERE taskId = ? ORDER BY key")
       .all(taskId) as unknown as TaskDocumentRow[];
@@ -7378,12 +7389,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       SELECT td.*, t.title as taskTitle, t.description as taskDescription, t.column as taskColumn
       FROM task_documents td
       JOIN tasks t ON td.taskId = t.id
+      WHERE t.${TaskStore.ACTIVE_TASKS_WHERE}
     `;
     const params: (string | number)[] = [];
 
     if (options?.searchQuery && options.searchQuery.trim() !== "") {
       const query = `%${options.searchQuery.trim()}%`;
-      sql += ` WHERE td.key LIKE ? OR td.content LIKE ? OR t.title LIKE ?`;
+      sql += ` AND (td.key LIKE ? OR td.content LIKE ? OR t.title LIKE ?)`;
       params.push(query, query, query);
     }
 
@@ -7406,6 +7418,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Get the current revision of a specific task document.
    */
   async getTaskDocument(taskId: string, key: string): Promise<TaskDocument | null> {
+    if (!this.hasActiveTask(taskId)) {
+      return null;
+    }
+
     const row = this.db
       .prepare("SELECT * FROM task_documents WHERE taskId = ? AND key = ?")
       .get(taskId, key) as unknown as TaskDocumentRow | undefined;
@@ -7517,6 +7533,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     key: string,
     options?: { limit?: number },
   ): Promise<TaskDocumentRevision[]> {
+    if (!this.hasActiveTask(taskId)) {
+      return [];
+    }
+
     const hasLimit = options?.limit !== undefined;
     const rows = hasLimit
       ? (this.db
@@ -7535,6 +7555,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   /**
    * Delete a task document and all archived revisions for its key.
+   * Read paths gate on the parent task's active state, but deletes remain allowed
+   * for forensic cleanup against soft-deleted parents.
    */
   async deleteTaskDocument(taskId: string, key: string): Promise<void> {
     const existing = this.db
@@ -7560,8 +7582,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     });
 
     this.db.bumpLastModified();
-    const task = await this.getTask(taskId);
-    this.emit("task:updated", task);
+    const task = this.readTaskFromDb(taskId, { includeDeleted: true });
+    if (task && task.deletedAt == null) {
+      this.emit("task:updated", task);
+    }
   }
 
   private getTaskPrInfos(task: Task): import("./types.js").PrInfo[] {

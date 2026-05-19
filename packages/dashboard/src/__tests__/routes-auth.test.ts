@@ -2494,7 +2494,7 @@ describe("Pause/Unpause endpoints", () => {
     }
 
     describe("GET /tasks/:id/documents", () => {
-      it("returns empty array when no documents", async () => {
+      it("returns empty array when the store hides documents for a soft-deleted parent", async () => {
         (store.getTaskDocuments as ReturnType<typeof vi.fn>).mockResolvedValue([]);
         const res = await GET(buildApp(), "/api/tasks/KB-001/documents");
         expect(res.status).toBe(200);
@@ -2521,7 +2521,7 @@ describe("Pause/Unpause endpoints", () => {
         expect(res.body).toEqual(doc);
       });
 
-      it("returns 404 when document not found", async () => {
+      it("returns 404 when the store hides a document for a soft-deleted parent", async () => {
         (store.getTaskDocument as ReturnType<typeof vi.fn>).mockResolvedValue(null);
         const res = await GET(buildApp(), "/api/tasks/KB-001/documents/missing");
         expect(res.status).toBe(404);
@@ -2541,7 +2541,14 @@ describe("Pause/Unpause endpoints", () => {
         expect(res.body).toEqual(revisions);
       });
 
-      it("returns empty array for nonexistent document", async () => {
+      it("returns empty array when the store hides revisions for a soft-deleted parent", async () => {
+        (store.getTaskDocumentRevisions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+        const res = await GET(buildApp(), "/api/tasks/KB-001/documents/missing/revisions");
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual([]);
+      });
+
+      it("returns empty array for nonexistent document errors", async () => {
         (store.getTaskDocumentRevisions as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("not found"));
         const res = await GET(buildApp(), "/api/tasks/KB-001/documents/missing/revisions");
         // Per spec: "Return empty array if document doesn't exist (not an error)"
@@ -2665,7 +2672,7 @@ describe("Pause/Unpause endpoints", () => {
         expect(res.body).toEqual([]);
       });
 
-      it("returns documents across multiple tasks", async () => {
+      it("returns only the live-parent documents surfaced by the store", async () => {
         const mockDocs = [
           {
             id: "doc-1",
@@ -2679,25 +2686,11 @@ describe("Pause/Unpause endpoints", () => {
             taskTitle: "Task One",
             taskColumn: "triage",
           },
-          {
-            id: "doc-2",
-            taskId: "KB-002",
-            key: "notes",
-            content: "Notes content",
-            revision: 1,
-            author: "agent",
-            createdAt: "2024-01-02T00:00:00.000Z",
-            updatedAt: "2024-01-02T00:00:00.000Z",
-            taskTitle: "Task Two",
-            taskColumn: "in-progress",
-          },
         ];
         (store.getAllDocuments as ReturnType<typeof vi.fn>).mockResolvedValue(mockDocs);
         const res = await GET(buildApp(), "/api/documents");
         expect(res.status).toBe(200);
-        expect(res.body).toHaveLength(2);
-        expect(res.body[0].taskTitle).toBe("Task One");
-        expect(res.body[1].taskTitle).toBe("Task Two");
+        expect(res.body).toEqual(mockDocs);
       });
 
       it("filters by search query", async () => {
