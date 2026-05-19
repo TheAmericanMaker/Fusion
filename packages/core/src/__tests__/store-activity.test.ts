@@ -480,6 +480,78 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("paused state on completion", () => {
+    const expectPauseFieldsCleared = (task: Awaited<ReturnType<typeof store.getTask>>) => {
+      expect(task.paused).toBeUndefined();
+      expect(task.userPaused).toBeUndefined();
+      expect(task.pausedByAgentId).toBeUndefined();
+      expect(task.pausedReason).toBeUndefined();
+    };
+
+    it("clears pause fields on moveTask(in-review → done)", async () => {
+      const task = await createTestTask();
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, {
+        paused: true,
+        pausedByAgentId: "agent-x",
+        pausedReason: "manual-hold",
+      });
+
+      await store.moveTask(task.id, "done");
+      const doneTask = await store.getTask(task.id);
+      expectPauseFieldsCleared(doneTask);
+    });
+
+    it("clears pause fields on moveTask(in-progress → done) when userPaused was set", async () => {
+      const task = await createTestTask();
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.updateTask(task.id, { userPaused: true });
+
+      await store.moveTask(task.id, "done");
+      const doneTask = await store.getTask(task.id);
+      expectPauseFieldsCleared(doneTask);
+    });
+
+    it("clears pause fields when mergeTask handles an already-done task", async () => {
+      const task = await createTestTask();
+      await store.moveTask(task.id, "done");
+      await store.updateTask(task.id, { paused: true, pausedByAgentId: "agent-x" });
+
+      await store.mergeTask(task.id);
+      const doneTask = await store.getTask(task.id);
+      expectPauseFieldsCleared(doneTask);
+    });
+
+    it("clears pause fields on unarchiveTask transition to done", async () => {
+      const task = await createTestTask();
+      await store.moveTask(task.id, "done");
+      await store.archiveTask(task.id);
+      await store.updateTask(task.id, { paused: true, pausedByAgentId: "agent-x", pausedReason: "manual-hold" });
+
+      await store.unarchiveTask(task.id);
+      const restored = await store.getTask(task.id);
+      expect(restored.column).toBe("done");
+      expectPauseFieldsCleared(restored);
+    });
+
+    it("remains idempotent across repeated done transitions", async () => {
+      const task = await createTestTask();
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "done");
+      await store.moveTask(task.id, "archived");
+      await store.updateTask(task.id, { paused: true, pausedByAgentId: "agent-x" });
+
+      await store.unarchiveTask(task.id);
+      await store.moveTask(task.id, "archived");
+      await store.unarchiveTask(task.id);
+      const doneTask = await store.getTask(task.id);
+      expectPauseFieldsCleared(doneTask);
+    });
+  });
+
   describe("execution timing timestamps", () => {
     it("preserves the original executionStartedAt across an internal rerun bounce", async () => {
       const task = await store.createTask({ description: "retry bounce timing" });
