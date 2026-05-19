@@ -115,7 +115,7 @@ describe("FN-5154 attribution-restricted done diff routes", () => {
     }
   });
 
-  it("preserves unrestricted range behavior when restriction flag is absent", async () => {
+  it("filters to own attributed files when landedFiles metadata is absent", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "fn-5154-attrib-unrestricted-"));
     try {
       git(rootDir, "init", "-b", "main");
@@ -149,8 +149,8 @@ describe("FN-5154 attribution-restricted done diff routes", () => {
 
       const diff = await getPath(store, "/api/tasks/FN-9999/diff");
       expect(diff.status).toBe(200);
-      expect(diff.body.stats.filesChanged).toBe(2);
-      expect(diff.body.files.map((f: { path: string }) => f.path).sort()).toEqual(["foreign.ts", "own.ts"]);
+      expect(diff.body.stats.filesChanged).toBe(1);
+      expect(diff.body.files.map((f: { path: string }) => f.path)).toEqual(["own.ts"]);
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }
