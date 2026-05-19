@@ -2,7 +2,10 @@
 import { describe, expect, it, vi } from "vitest";
 import express from "express";
 import { computeContentFingerprint, type Column, type Task, type TaskStore } from "@fusion/core";
-import { registerTaskWorkflowRoutes } from "../routes/register-task-workflow-routes.js";
+import {
+  __fingerprintCreateLocksForTests,
+  registerTaskWorkflowRoutes,
+} from "../routes/register-task-workflow-routes.js";
 import { request as performRequest } from "../test-request.js";
 import { ApiError, sendErrorResponse } from "../api-error.js";
 
@@ -132,6 +135,14 @@ function buildApp(seed: Task[] = []) {
 }
 
 describe("task deterministic dedup", () => {
+  beforeEach(() => {
+    __fingerprintCreateLocksForTests.clear();
+  });
+
+  afterEach(() => {
+    __fingerprintCreateLocksForTests.clear();
+  });
+
   it("blocks sequential duplicate create with deterministic 409", async () => {
     const { app } = buildApp([
       mkTask({ id: "FN-1", title: TITLE, description: DESCRIPTION, column: "todo", source: { sourceType: "api", sourceMetadata: { contentFingerprint: FINGERPRINT } } }),
@@ -230,5 +241,85 @@ describe("task deterministic dedup", () => {
     const res = await performRequest(app, "POST", "/api/tasks", JSON.stringify({ title: TITLE, description: DESCRIPTION, acknowledgedDuplicates: ["FN-1"] }), { "content-type": "application/json" });
     expect(res.status).toBe(201);
     expect(runtimeLogger.warn).toHaveBeenCalled();
+  });
+
+  describe("fail-open boundary (FN-5084)", () => {
+    it("continues create when deterministic store query throws", async () => {
+      const { app, store, runtimeLogger } = buildApp();
+      const queryMock = store.findRecentTasksByContentFingerprint as ReturnType<typeof vi.fn>;
+      queryMock.mockRejectedValueOnce(new Error("transient sqlite error"));
+
+      const res = await performRequest(app, "POST", "/api/tasks", JSON.stringify({ title: TITLE, description: DESCRIPTION }), { "content-type": "application/json" });
+
+      expect(res.status).toBe(201);
+      expect(store.createTask).toHaveBeenCalledTimes(1);
+      expect(runtimeLogger.warn).toHaveBeenCalledTimes(1);
+      expect(runtimeLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("FN-5084"),
+        expect.objectContaining({
+          contentFingerprint: FINGERPRINT,
+        }),
+      );
+    });
+
+    it("keeps deterministic conflict as 409 and does not log fail-open warning", async () => {
+      const { app, runtimeLogger } = buildApp([
+        mkTask({ id: "FN-1", title: TITLE, description: DESCRIPTION, column: "todo", source: { sourceType: "api", sourceMetadata: { contentFingerprint: FINGERPRINT } } }),
+      ]);
+
+      const res = await performRequest(app, "POST", "/api/tasks", JSON.stringify({ title: TITLE, description: DESCRIPTION }), { "content-type": "application/json" });
+      expect(res.status).toBe(409);
+      expect(runtimeLogger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("FN-5084"),
+        expect.anything(),
+      );
+    });
+
+    it("continues create when leader lock promise rejects", async () => {
+      const { app, store, runtimeLogger } = buildApp();
+      const lockKey = `p-1:${FINGERPRINT}`;
+      const rejectedLeaderLock = Promise.reject(new Error("leader lock failed"));
+      rejectedLeaderLock.catch(() => {});
+      __fingerprintCreateLocksForTests.set(lockKey, rejectedLeaderLock);
+
+      const res = await performRequest(app, "POST", "/api/tasks", JSON.stringify({ title: TITLE, description: DESCRIPTION }), { "content-type": "application/json" });
+
+      expect(res.status).toBe(201);
+      expect(store.createTask).toHaveBeenCalledTimes(1);
+      expect(runtimeLogger.warn).toHaveBeenCalledTimes(1);
+      expect(runtimeLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("FN-5084"),
+        expect.objectContaining({ contentFingerprint: FINGERPRINT }),
+      );
+    });
+
+    it("releases lock on fail-open path so follow-up request resolves", async () => {
+      const { app, store } = buildApp();
+      const queryMock = store.findRecentTasksByContentFingerprint as ReturnType<typeof vi.fn>;
+      queryMock.mockRejectedValueOnce(new Error("transient sqlite error"));
+
+      const first = await performRequest(app, "POST", "/api/tasks", JSON.stringify({ title: TITLE, description: DESCRIPTION }), { "content-type": "application/json" });
+      const second = await performRequest(app, "POST", "/api/tasks", JSON.stringify({ title: TITLE, description: DESCRIPTION }), { "content-type": "application/json" });
+
+      expect(first.status).toBe(201);
+      expect([201, 200, 409]).toContain(second.status);
+    });
+
+    it("skips deterministic lookup when bypassDuplicateCheck is true", async () => {
+      const { app, store } = buildApp();
+      const queryMock = store.findRecentTasksByContentFingerprint as ReturnType<typeof vi.fn>;
+      queryMock.mockRejectedValue(new Error("transient sqlite error"));
+
+      const res = await performRequest(
+        app,
+        "POST",
+        "/api/tasks",
+        JSON.stringify({ title: TITLE, description: DESCRIPTION, bypassDuplicateCheck: true }),
+        { "content-type": "application/json" },
+      );
+
+      expect(res.status).toBe(201);
+      expect(queryMock).not.toHaveBeenCalled();
+    });
   });
 });

@@ -40,6 +40,12 @@ Dashboard `POST /tasks` now performs a pre-create duplicate gate using token-ove
 
 This deterministic layer complements (does not replace) the FN-4829 similarity warning gate. `bypassDuplicateCheck: true` on `POST /tasks` disables both gates. FN-4892 remains a separate engine-side same-agent intake heuristic at triage finalize.
 
+##### Fail-open boundary (FN-5084)
+
+The deterministic **pre-check** now fails open: transient store query failures, in-process mutex bookkeeping failures, and leader-lock promise rejections do not block task creation. The route logs one `runtimeLogger.warn` line tagged `FN-5084` (including `projectId` and `contentFingerprint`) and continues through the FN-4829 similarity gate to normal create handling.
+
+Only legitimate deterministic duplicate detections continue to propagate as `409` via `ApiError` from `conflict("duplicate_candidates", ...)`. The post-create FN-4918 reconciliation pass remains the second line of defense.
+
 ### Intake auto-archive (ghost-bug preflight + same-agent duplicate)
 
 Fusion applies two conservative intake heuristics that may auto-archive newly filed tasks before execution starts:

@@ -39,6 +39,7 @@ const REVIEW_VERDICT_RE = /###\s+Verdict:\s*(APPROVE|REVISE|RETHINK|UNAVAILABLE)
 const REVIEW_STEP_RE = /^(plan|code) review Step (\d+): (APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const DUPLICATE_STOPWORDS = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "is", "on", "with", "fn"]);
 const fingerprintCreateLocks = new Map<string, Promise<void>>();
+export const __fingerprintCreateLocksForTests = fingerprintCreateLocks;
 
 function buildDuplicateQuery(title: string | undefined, description: string): string {
   const tokens = `${title ?? ""} ${description}`
@@ -432,41 +433,54 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
 
       if (bypassDuplicateCheck !== true && contentFingerprint) {
         const fingerprintLockKey = `${projectId}:${contentFingerprint}`;
-        const existingLock = fingerprintCreateLocks.get(fingerprintLockKey);
-        if (existingLock) {
-          await existingLock;
-        }
-
-        let releaseLock: (() => void) | undefined;
-        const gate = new Promise<void>((resolve) => {
-          releaseLock = resolve;
-        });
-        fingerprintCreateLocks.set(fingerprintLockKey, gate);
+        // FN-5084: fail open on pre-check / mutex errors; only legitimate ApiError (409) instances propagate.
         try {
-          const deterministicMatches = await scopedStore.findRecentTasksByContentFingerprint(contentFingerprint, {
-            windowMs: 60_000,
-            includeArchived: false,
+          const existingLock = fingerprintCreateLocks.get(fingerprintLockKey);
+          if (existingLock) {
+            // Future lock implementations may reject; outer fail-open boundary preserves create availability.
+            await existingLock;
+          }
+
+          let releaseLock: (() => void) | undefined;
+          const gate = new Promise<void>((resolve) => {
+            releaseLock = resolve;
           });
-          const deterministicConflict = deterministicMatches.find(
-            (match) => !acknowledgedDuplicateIds.includes(match.id),
-          );
-          if (deterministicConflict) {
-            throw conflict("duplicate_candidates", {
-              matches: [{
-                id: deterministicConflict.id,
-                title: deterministicConflict.title ?? "",
-                description: deterministicConflict.description ?? "",
-                column: deterministicConflict.column,
-                score: 1,
-                deterministic: true,
-              }],
+          fingerprintCreateLocks.set(fingerprintLockKey, gate);
+          try {
+            const deterministicMatches = await scopedStore.findRecentTasksByContentFingerprint(contentFingerprint, {
+              windowMs: 60_000,
+              includeArchived: false,
             });
+            const deterministicConflict = deterministicMatches.find(
+              (match) => !acknowledgedDuplicateIds.includes(match.id),
+            );
+            if (deterministicConflict) {
+              throw conflict("duplicate_candidates", {
+                matches: [{
+                  id: deterministicConflict.id,
+                  title: deterministicConflict.title ?? "",
+                  description: deterministicConflict.description ?? "",
+                  column: deterministicConflict.column,
+                  score: 1,
+                  deterministic: true,
+                }],
+              });
+            }
+          } finally {
+            if (releaseLock) {
+              releaseLock();
+            }
+            fingerprintCreateLocks.delete(fingerprintLockKey);
           }
-        } finally {
-          if (releaseLock) {
-            releaseLock();
+        } catch (error) {
+          if (error instanceof ApiError) {
+            throw error;
           }
-          fingerprintCreateLocks.delete(fingerprintLockKey);
+          runtimeLogger.warn("FN-5084: deterministic duplicate pre-check failed open; continuing with task create", {
+            projectId,
+            contentFingerprint,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
 
