@@ -2573,6 +2573,7 @@ export class TaskExecutor {
     for (const task of tasks) {
       if (
         task.assignedAgentId === agentId
+        && !task.deletedAt
         && !task.paused
         && !this.executing.has(task.id)
         && !this.activeSessions.has(task.id)
@@ -2607,7 +2608,7 @@ export class TaskExecutor {
 
     const tasks = await this.store.listTasks({ slim: true, column: "in-progress" });
     const inProgress = tasks.filter(
-      (t) => t.column === "in-progress" && !this.executing.has(t.id) && !t.paused,
+      (t) => t.column === "in-progress" && !t.deletedAt && !this.executing.has(t.id) && !t.paused,
     );
 
     if (inProgress.length === 0) return;
@@ -2724,6 +2725,13 @@ export class TaskExecutor {
     // stuck-detector, resumeTaskForAgent, etc.). Per-instance state stays
     // consistent with the process-wide lock.
     this.executing.add(task.id);
+
+    if (task.deletedAt) {
+      executorLog.warn(`${task.id}: refusing execute — task is soft-deleted`);
+      this.executing.delete(task.id);
+      executingTaskLock.release(task.id);
+      return;
+    }
 
     const assignedAgentId = task.assignedAgentId;
     if (assignedAgentId && await this.shouldDeferForHeartbeat(assignedAgentId)) {
