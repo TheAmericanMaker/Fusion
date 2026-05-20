@@ -6387,7 +6387,6 @@ export async function aiMergeTask(
       | "merge:reuse-handoff-refused"
       | "merge:reuse-handoff-released"
       | "merge:reuse-handoff-deferred-to-worktrunk"
-      | "merge:reuse-fallback-cwd-main"
       | "merge:reuse-fallback-new-worktree"
       | "branch:auto-canonicalize-case",
     metadata: Record<string, unknown>,
