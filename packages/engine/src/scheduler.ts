@@ -189,22 +189,13 @@ function formatConcurrencyLimitReason(diagnostic: ConcurrencyGateDiagnostic): st
   return `queued — concurrency limit reached: gate=${gateLabel}; ${details.join("; ")}`;
 }
 
-function formatConcurrencyLimitMemoKey(diagnostic: ConcurrencyGateDiagnostic): string {
+export function formatConcurrencyLimitMemoKey(diagnostic: ConcurrencyGateDiagnostic): string {
   const gates = diagnostic.bindingGates.join(",");
-  const gateDetails = diagnostic.bindingGates.map((gate) => {
-    const snapshot = gate === "maxConcurrent"
-      ? diagnostic.maxConcurrentGate
-      : gate === "maxWorktrees"
-        ? diagnostic.maxWorktreesGate
-        : diagnostic.semaphoreGate;
-    const holders = diagnostic.holders[gate];
-    const holderKey = holders && holders.length > 0 ? holders.join(",") : "none";
-    if (!snapshot) {
-      return `${gate}:missing:${holderKey}`;
-    }
-    return `${gate}:${snapshot.used}/${snapshot.limit}:${holderKey}`;
-  });
-  return `queued-concurrency:${gates}:${gateDetails.join("|")}`;
+  const bindingHolders = [...new Set(
+    diagnostic.bindingGates.flatMap((gate) => diagnostic.holders[gate] ?? []),
+  )].sort();
+  const holderKey = bindingHolders.length > 0 ? bindingHolders.join(",") : "none";
+  return `queued-concurrency:${gates}:holders=${holderKey}`;
 }
 
 export interface SchedulerOptions {
