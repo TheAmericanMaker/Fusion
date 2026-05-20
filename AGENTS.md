@@ -282,7 +282,7 @@ Every squash commit path enforces a file-scope invariant immediately before comm
 
 Per-task opt-out: `task.scopeOverride = true` (log `task.scopeOverrideReason` when set). Empty scopes are not enforced.
 
-File Scope entries are validated when PROMPT.md is written — non-path tokens (git refs, URLs, SHAs, bare identifiers) are rejected with `InvalidFileScopeError`.
+File Scope entries are validated when PROMPT.md is written — author paths (`createTask`, `updateTask`) still reject non-path tokens (git refs, URLs, SHAs, bare identifiers) with `InvalidFileScopeError`, while copy paths (`duplicateTask`, `restoreFromArchive`) sanitize invalid entries out of the rewritten PROMPT.md and log the drop.
 
 ### Manual audit script
 

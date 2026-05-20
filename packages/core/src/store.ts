@@ -732,6 +732,38 @@ function validateFileScopeInPromptContent(prompt: string): { valid: string[]; in
   return { valid, invalid };
 }
 
+function sanitizeFileScopeInPromptContent(prompt: string): { sanitized: string; dropped: string[]; kept: string[] } {
+  const headingMatch = prompt.match(/^##\s+File\s+Scope\s*$/m);
+  if (!headingMatch) {
+    return { sanitized: prompt, dropped: [], kept: [] };
+  }
+
+  const startIdx = headingMatch.index! + headingMatch[0].length;
+  const rest = prompt.slice(startIdx);
+  const nextHeading = rest.search(/\n##?\s/);
+  const endIdx = nextHeading === -1 ? prompt.length : startIdx + nextHeading;
+  const section = prompt.slice(startIdx, endIdx);
+  const { valid: kept, invalid: dropped } = validateFileScopeInPromptContent(prompt);
+  if (dropped.length === 0) {
+    return { sanitized: prompt, dropped, kept };
+  }
+
+  const sanitizedSection = section
+    .split("\n")
+    .filter((line) => {
+      const tokens = Array.from(line.matchAll(/`([^`]+)`/g), (match) => match[1]);
+      if (tokens.length === 0) return true;
+      return tokens.every((token) => isValidFileScopeEntry(token));
+    })
+    .join("\n");
+
+  return {
+    sanitized: `${prompt.slice(0, startIdx)}${sanitizedSection}${prompt.slice(endIdx)}`,
+    dropped,
+    kept,
+  };
+}
+
 export const SELF_DEFEATING_OPERATION_VERBS = [
   "finalize", // Terminalize target task state
   "diagnose", // Investigate/diagnose target task failure
@@ -3636,17 +3668,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
         const newDir = this.taskDir(newId);
         await this.atomicCreateTaskJson(newDir, newTask, "duplicateTask");
-        const validation = validateFileScopeInPromptContent(sourceTask.prompt);
-        if (validation.invalid.length > 0) {
-          this.deleteTaskById(newId);
-          const { rm } = await import("node:fs/promises");
-          if (existsSync(newDir)) {
-            await rm(newDir, { recursive: true, force: true });
-          }
-          throw new InvalidFileScopeError(newId, validation.invalid);
+        const sanitizedPrompt = sanitizeFileScopeInPromptContent(sourceTask.prompt);
+        if (sanitizedPrompt.dropped.length > 0) {
+          storeLog.log(`[file-scope-sanitize] duplicate ${newId} from ${id}: dropped=[${sanitizedPrompt.dropped.join(",")}]`);
         }
         await mkdir(newDir, { recursive: true });
-        await writeFile(join(newDir, "PROMPT.md"), sourceTask.prompt);
+        await writeFile(join(newDir, "PROMPT.md"), sanitizedPrompt.sanitized);
 
         if (this.isWatching) this.taskCache.set(newId, { ...newTask });
         this.emit("task:created", newTask);
@@ -3718,18 +3745,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         const newDir = this.taskDir(newId);
         await this.atomicCreateTaskJson(newDir, newTask, "refineTask");
         const prompt = `# ${newTask.title}\n\n${newTask.description}\n`;
-        // Defensive no-op for refine prompts, which typically have no File Scope section.
-        const validation = validateFileScopeInPromptContent(prompt);
-        if (validation.invalid.length > 0) {
-          this.deleteTaskById(newId);
-          const { rm } = await import("node:fs/promises");
-          if (existsSync(newDir)) {
-            await rm(newDir, { recursive: true, force: true });
-          }
-          throw new InvalidFileScopeError(newId, validation.invalid);
-        }
+        const sanitizedPrompt = sanitizeFileScopeInPromptContent(prompt);
         await mkdir(newDir, { recursive: true });
-        await writeFile(join(newDir, "PROMPT.md"), prompt);
+        await writeFile(join(newDir, "PROMPT.md"), sanitizedPrompt.sanitized);
 
         if (sourceTask.attachments && sourceTask.attachments.length > 0) {
           const sourceAttachDir = join(this.taskDir(id), "attachments");
@@ -8809,12 +8827,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     // Generate PROMPT.md with preserved steps
     const prompt = entry.prompt ?? this.generatePromptFromArchiveEntry(entry);
-    const validation = validateFileScopeInPromptContent(prompt);
-    if (validation.invalid.length > 0) {
-      throw new InvalidFileScopeError(entry.id, validation.invalid);
+    const sanitizedPrompt = sanitizeFileScopeInPromptContent(prompt);
+    if (sanitizedPrompt.dropped.length > 0) {
+      storeLog.log(`[file-scope-sanitize] restore ${entry.id}: dropped=[${sanitizedPrompt.dropped.join(",")}]`);
     }
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "PROMPT.md"), prompt);
+    await writeFile(join(dir, "PROMPT.md"), sanitizedPrompt.sanitized);
 
     // Create empty attachments directory if attachments existed
     if (entry.attachments && entry.attachments.length > 0) {
