@@ -8,26 +8,28 @@ import { buildCommitMsgTrailerHook, buildIdentityGuardHook, installTaskWorktreeI
 
 describe("worktree-hooks", () => {
   it("builds a hook with expected guard lines", () => {
-    const hook = buildIdentityGuardHook("FN-1");
+    const hook = buildIdentityGuardHook("FN-5210");
     expect(hook).toContain("#!/bin/sh");
     expect(hook).toContain("TASK_FILE=$(git rev-parse --git-path fusion-task-id)");
+    expect(hook).toContain('EXPECTED_BRANCH="fusion/fn-5210"');
     expect(hook).toContain("tr '[:upper:]' '[:lower:]'");
-    expect(hook).toContain(`EXPECTED_BRANCH="fusion/$(printf '%s' "$WORKTREE_TASK_ID" | tr '[:upper:]' '[:lower:]')"`);
+    expect(hook).toContain('EXPECTED_BRANCH="fusion/$(printf \'%s\' \"$WORKTREE_TASK_ID\" | tr \'[:upper:]\' \'[:lower:]\')"');
+    expect(hook).toContain('HEAD_BRANCH_CANONICAL=$(printf \'%s\' "$HEAD_BRANCH" | tr \'[:upper:]\' \'[:lower:]\')');
+    expect(hook).toContain('EXPECTED_BRANCH_CANONICAL=$(printf \'%s\' "$EXPECTED_BRANCH" | tr \'[:upper:]\' \'[:lower:]\')');
     expect(hook).toContain("fusion: refusing commit — worktree owns");
     expect(hook).toContain("fusion/step-[0-9]*-[a-z0-9-]*");
-    expect(hook).not.toContain("fusion/fn-1");
-    expect(hook).not.toContain("FN-1");
-    expect(hook).not.toContain("fn-1");
-    expect(hook).not.toMatch(/if \[ "\$WORKTREE_TASK_ID" !=/);
+    expect(hook).toContain('!= "fn-5210"');
+    expect(hook).toContain("# Keep this canonicalized in lockstep with canonicalFusionBranchName(taskId)");
+    expect(hook).not.toContain("FN-5210");
   });
 
-  it("does not vary by install-time task id", () => {
-    const firstHook = buildIdentityGuardHook("FN-1");
-    const secondHook = buildIdentityGuardHook("FN-9999");
+  it.each([
+    ["FN-1", "fusion/fn-1"],
+    ["FN-9999", "fusion/fn-9999"],
+  ])("uses the install-time task id as the canonical default branch for %s", (taskId, expectedBranch) => {
+    const hook = buildIdentityGuardHook(taskId);
 
-    expect(firstHook).toBe(secondHook);
-    expect(firstHook).not.toContain("FN-1");
-    expect(firstHook).not.toContain("FN-9999");
+    expect(hook).toContain(`EXPECTED_BRANCH=\"${expectedBranch}\"`);
   });
 
   it("builds commit-msg trailer hook with expected lines", () => {

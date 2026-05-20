@@ -19,12 +19,12 @@ function toShellCasePattern(pattern: string): string {
 /**
  * Build the shared pre-commit identity-guard hook.
  *
- * The emitted script must stay metadata-driven because linked git worktrees share
- * the common hooks directory. The install-time taskId is intentionally unused in
- * the hook body; each commit resolves its owning task from `fusion-task-id` and
- * lowercases it to stay aligned with canonicalFusionBranchName(taskId).
+ * The emitted script must stay metadata-aware because linked git worktrees share
+ * the common hooks directory. It bakes in the install-time taskId as the default
+ * expected branch, then falls back to `fusion-task-id` when runtime metadata
+ * drifts so the shared hook still follows the current owning task.
  */
-export function buildIdentityGuardHook(_taskId: string, allowedBranchPatterns: readonly string[] = DEFAULT_ALLOWED_BRANCH_PATTERNS): string {
+export function buildIdentityGuardHook(taskId: string, allowedBranchPatterns: readonly string[] = DEFAULT_ALLOWED_BRANCH_PATTERNS): string {
   const allowChecks = allowedBranchPatterns.map((pattern) => `  ${toShellCasePattern(pattern)}) exit 0 ;;`).join("\n");
 
   return `#!/bin/sh
@@ -38,13 +38,20 @@ fi
 
 WORKTREE_TASK_ID=$(cat "$TASK_FILE")
 # Keep this canonicalized in lockstep with canonicalFusionBranchName(taskId)
-EXPECTED_BRANCH="fusion/$(printf '%s' "$WORKTREE_TASK_ID" | tr '[:upper:]' '[:lower:]')"
+EXPECTED_BRANCH=${JSON.stringify(`fusion/${taskId.toLowerCase()}`)}
+
+if [ "$(printf '%s' "$WORKTREE_TASK_ID" | tr '[:upper:]' '[:lower:]')" != ${JSON.stringify(taskId.toLowerCase())} ]; then
+  EXPECTED_BRANCH="fusion/$(printf '%s' "$WORKTREE_TASK_ID" | tr '[:upper:]' '[:lower:]')"
+fi
 
 if ! HEAD_BRANCH=$(git symbolic-ref --quiet --short HEAD 2>/dev/null); then
   HEAD_BRANCH="detached"
 fi
 
-if [ "$HEAD_BRANCH" = "$EXPECTED_BRANCH" ]; then
+HEAD_BRANCH_CANONICAL=$(printf '%s' "$HEAD_BRANCH" | tr '[:upper:]' '[:lower:]')
+EXPECTED_BRANCH_CANONICAL=$(printf '%s' "$EXPECTED_BRANCH" | tr '[:upper:]' '[:lower:]')
+
+if [ "$HEAD_BRANCH_CANONICAL" = "$EXPECTED_BRANCH_CANONICAL" ]; then
   exit 0
 fi
 
