@@ -92,6 +92,19 @@ export {
   ensureDefaultHeartbeatProcedureFile,
 } from "./agent-instructions.js";
 export { HEARTBEAT_PROCEDURE, HEARTBEAT_SYSTEM_PROMPT, HEARTBEAT_NO_TASK_SYSTEM_PROMPT } from "./agent-heartbeat.js";
+export {
+  MOCK_PROVIDER_ID,
+  MOCK_SYNTHETIC_TOKEN_USAGE,
+  MockAgentRuntime,
+  MockAgentSession,
+  mockScriptRegistry,
+  setMockScript,
+  clearMockScript,
+  resetMockScripts,
+  resolveMockScript,
+  type MockScript,
+  type MockScriptContext,
+} from "./providers/index.js";
 export { WorktreePool, scanIdleWorktrees, cleanupOrphanedWorktrees, reapOrphanWorktrees } from "./worktree-pool.js";
 export {
   pruneWorktreeAdminEntries,

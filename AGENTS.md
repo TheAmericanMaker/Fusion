@@ -351,6 +351,14 @@ All three lanes (planning / executor / reviewer) follow the same 5-tier preceden
 4. Project `defaultProviderOverride` / `defaultModelIdOverride`
 5. Global `defaultProvider` / `defaultModelId` → automatic resolution
 
+### Mock provider (test mode)
+
+Set `defaultProvider: "mock"` at any tier in that hierarchy (or the per-task lane override) to force planning, executor, reviewer/validator, merger, and heartbeat sessions onto the deterministic zero-network mock runtime.
+Default scripts are scripted by session purpose: executor marks unfinished steps done, triage writes a minimal PROMPT.md and calls `fn_review_spec` when available, reviewer/validation emit `Verdict: APPROVE`, and merger/heartbeat no-op safely.
+Per-task and global script overrides live in `mockScriptRegistry` (`setMockScript`, `clearMockScript`, `resetMockScripts`) exported from `@fusion/engine`.
+The mock runtime never registers with pi's `ModelRegistry` and is guarded by tests that fail on any `fetch`, `http.request`, or `https.request` usage.
+Activation UX/settings affordances are handled separately in FN-5204.
+
 ### Per-task token budget precedence
 
 1. `task.tokenBudgetOverride`
