@@ -120,6 +120,7 @@ describe("resolveSessionProvider", () => {
 describe("ChatView default model icon", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     mockFetchModels.mockResolvedValue({
       models: [],
       favoriteProviders: [],

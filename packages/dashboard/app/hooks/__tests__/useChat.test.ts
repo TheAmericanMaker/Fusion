@@ -93,7 +93,8 @@ const setDocumentVisibilityState = (state: DocumentVisibilityState) => {
 };
 
 describe("useChat", () => {
-  const chatSessionsCacheKey = (projectId: string) => `kb-dashboard-chat-sessions-cache:${projectId}`;
+  const chatSessionsCacheKey = (projectId: string) => `${swrCacheModule.SWR_CACHE_KEYS.CHAT_SESSIONS_PREFIX}${projectId}`;
+  const chatMessagesCacheKey = (projectId: string, sessionId: string) => `${swrCacheModule.SWR_CACHE_KEYS.CHAT_MESSAGES_PREFIX}${projectId}:${sessionId}`;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -422,6 +423,143 @@ describe("useChat", () => {
     const calls = mockFetchAgents.mock.calls;
     expect(calls[0][1]).toBe("proj-001");
     expect(calls[1][1]).toBe("proj-002");
+  });
+
+  it("hydrates restored active-session messages from cache before network resolves", async () => {
+    const projectId = "proj-message-cache-hit";
+    const session = makeSession({ id: "session-001", agentId: "agent-001" });
+    localStorage.setItem(
+      chatSessionsCacheKey(projectId),
+      JSON.stringify({ savedAt: Date.now(), data: [session] }),
+    );
+    localStorage.setItem(
+      chatMessagesCacheKey(projectId, session.id),
+      JSON.stringify({
+        savedAt: Date.now(),
+        data: [makeMessage({ id: "msg-cached", sessionId: session.id, role: "assistant", content: "Cached reply" })],
+      }),
+    );
+    mockGetScopedItem.mockReturnValue(session.id);
+
+    let resolveFetch: ((value: { messages: ChatMessage[] }) => void) | undefined;
+    mockFetchChatMessages.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFetch = resolve;
+    }));
+
+    const { result } = renderHook(() => useChat(projectId));
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe(session.id);
+    });
+
+    expect(result.current.messagesLoading).toBe(false);
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({ id: "msg-cached", content: "Cached reply" }),
+    ]);
+
+    await act(async () => {
+      resolveFetch?.({ messages: [makeMessage({ id: "msg-fresh", sessionId: session.id, role: "assistant", content: "Fresh reply" })] });
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages[0]?.id).toBe("msg-fresh");
+    });
+  });
+
+  it("writes loaded messages through to cache", async () => {
+    const projectId = "proj-message-write-through";
+    const session = makeSession({ id: "session-001", agentId: "agent-001" });
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatMessages.mockResolvedValueOnce({
+      messages: [
+        makeMessage({ id: "msg-001", sessionId: session.id, role: "user", content: "Hello" }),
+        makeMessage({ id: "msg-002", sessionId: session.id, role: "assistant", content: "Hi" }),
+      ],
+    });
+
+    const { result } = renderHook(() => useChat(projectId));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession(session.id);
+    });
+
+    await waitFor(() => {
+      const raw = localStorage.getItem(chatMessagesCacheKey(projectId, session.id));
+      expect(raw).toBeTruthy();
+      const parsed = JSON.parse(raw ?? "null") as { data: ChatMessage[] };
+      expect(parsed.data).toHaveLength(2);
+    });
+  });
+
+  it("shows loading on message cache miss until the fetch resolves", async () => {
+    const projectId = "proj-message-cache-miss";
+    const session = makeSession({ id: "session-001", agentId: "agent-001" });
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+
+    let resolveFetch: ((value: { messages: ChatMessage[] }) => void) | undefined;
+    mockFetchChatMessages.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFetch = resolve;
+    }));
+
+    const { result } = renderHook(() => useChat(projectId));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession(session.id);
+    });
+
+    expect(result.current.messagesLoading).toBe(true);
+
+    await act(async () => {
+      resolveFetch?.({ messages: [makeMessage({ id: "msg-001", sessionId: session.id, role: "assistant", content: "Loaded" })] });
+    });
+
+    await waitFor(() => {
+      expect(result.current.messagesLoading).toBe(false);
+      expect(result.current.messages[0]).toEqual(expect.objectContaining({ id: "msg-001", content: "Loaded" }));
+    });
+  });
+
+  it("does not overwrite the session cache when paginating older messages", async () => {
+    const projectId = "proj-pagination-cache";
+    const session = makeSession({ id: "session-001", agentId: "agent-001" });
+    const newestPage = Array.from({ length: 50 }, (_, index) =>
+      makeMessage({ id: `msg-${index + 1}`, sessionId: session.id, role: "assistant", content: `Message ${index + 1}` }),
+    );
+    const olderPage = [makeMessage({ id: "msg-old", sessionId: session.id, role: "assistant", content: "Older message" })];
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatMessages
+      .mockResolvedValueOnce({ messages: newestPage })
+      .mockResolvedValueOnce({ messages: olderPage });
+
+    const { result } = renderHook(() => useChat(projectId));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession(session.id);
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(50);
+    });
+
+    await act(async () => {
+      await result.current.loadMoreMessages();
+    });
+
+    const parsed = JSON.parse(localStorage.getItem(chatMessagesCacheKey(projectId, session.id)) ?? "null") as { data: ChatMessage[] };
+    expect(parsed.data).toHaveLength(50);
+    expect(parsed.data[0]?.id).toBe("msg-1");
   });
 
   it("selects a session and loads its messages", async () => {
@@ -2279,7 +2417,7 @@ describe("useChat", () => {
       });
     });
 
-    it("clears active session when it is deleted", async () => {
+    it("clears active session cache when it is deleted", async () => {
       mockFetchChatSessions.mockResolvedValueOnce({
         sessions: [makeSession({ id: "session-001", agentId: "agent-001" })],
       });
@@ -2299,6 +2437,12 @@ describe("useChat", () => {
         expect(result.current.activeSession?.id).toBe("session-001");
       });
 
+      const clearCacheSpy = vi.spyOn(swrCacheModule, "clearCache");
+      localStorage.setItem(
+        chatMessagesCacheKey("proj-123", "session-001"),
+        JSON.stringify({ savedAt: Date.now(), data: [makeMessage({ id: "msg-001", sessionId: "session-001", role: "assistant", content: "Cached" })] }),
+      );
+
       // Simulate SSE event for the active session
       act(() => {
         subscribeHandler["chat:session:deleted"]?.({
@@ -2310,6 +2454,8 @@ describe("useChat", () => {
         expect(result.current.activeSession).toBeNull();
         expect(result.current.messages).toHaveLength(0);
       });
+
+      expect(clearCacheSpy).toHaveBeenCalledWith(chatMessagesCacheKey("proj-123", "session-001"));
     });
 
     it("adds message on chat:message:added event for active session", async () => {

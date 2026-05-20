@@ -28,10 +28,8 @@ import { useChat, type ChatMessageInfo, type FailureInfo, type ToolCallInfo } fr
 import { useChatRooms } from "../hooks/useChatRooms";
 import { useChatUnread } from "../hooks/useChatUnread";
 import { useViewportMode } from "./Header";
-import { fetchAgents, fetchDiscoveredSkills, fetchModels, updateGlobalSettings } from "../api";
+import { updateGlobalSettings } from "../api";
 import type { Agent } from "@fusion/core";
-import type { DiscoveredSkill } from "@fusion/dashboard";
-import type { ModelInfo } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";
 import { AgentMentionPopup } from "./AgentMentionPopup";
@@ -39,6 +37,9 @@ import { AgentAvatar } from "./AgentAvatar";
 import { FileMentionPopup } from "./FileMentionPopup";
 import { CreateRoomModal } from "./CreateRoomModal";
 import { useFileMention } from "../hooks/useFileMention";
+import { useModelsCache } from "../hooks/useModelsCache";
+import { useDiscoveredSkillsCache } from "../hooks/useDiscoveredSkillsCache";
+import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { matchesAgentMentionFilter } from "./mentionMatching";
@@ -515,60 +516,20 @@ interface NewChatDialogProps {
 
 function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
   const [chatMode, setChatMode] = useState<"agent" | "model">("agent");
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [agentsLoading, setAgentsLoading] = useState(true);
+  const { agents, loading: agentsLoading } = useAgentsMapCache(projectId);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
+  const { models, favoriteProviders: cachedFavoriteProviders, favoriteModels: cachedFavoriteModels, loading: modelsLoading, refresh } = useModelsCache();
   const [selectedModel, setSelectedModel] = useState<string>("");
-  const [favoriteProviders, setFavoriteProviders] = useState<string[]>([]);
-  const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
+  const [favoriteProviders, setFavoriteProviders] = useState<string[]>(cachedFavoriteProviders);
+  const [favoriteModels, setFavoriteModels] = useState<string[]>(cachedFavoriteModels);
 
-  // Load agents on mount (project-scoped)
   useEffect(() => {
-    let cancelled = false;
-    setAgentsLoading(true);
-    fetchAgents(undefined, projectId)
-      .then((response) => {
-        if (!cancelled) {
-          setAgents(response);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          // Silently fail - show empty list
-          setAgents([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setAgentsLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
+    setFavoriteProviders(cachedFavoriteProviders);
+  }, [cachedFavoriteProviders]);
 
-  // Load models on mount
   useEffect(() => {
-    setModelsLoading(true);
-    fetchModels()
-      .then((response) => {
-        setModels(response.models);
-        setFavoriteProviders(response.favoriteProviders);
-        setFavoriteModels(response.favoriteModels);
-      })
-      .catch(() => {
-        // Silently fail - show empty list
-        setModels([]);
-        setFavoriteProviders([]);
-        setFavoriteModels([]);
-      })
-      .finally(() => {
-        setModelsLoading(false);
-      });
-  }, []);
+    setFavoriteModels(cachedFavoriteModels);
+  }, [cachedFavoriteModels]);
 
   const handleToggleFavorite = useCallback(async (provider: string) => {
     const currentFavorites = favoriteProviders;
@@ -581,10 +542,11 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
 
     try {
       await updateGlobalSettings({ favoriteProviders: newFavorites, favoriteModels });
+      await refresh();
     } catch {
       setFavoriteProviders(currentFavorites);
     }
-  }, [favoriteProviders, favoriteModels]);
+  }, [favoriteProviders, favoriteModels, refresh]);
 
   const handleToggleModelFavorite = useCallback(async (modelId: string) => {
     const currentFavorites = favoriteModels;
@@ -597,10 +559,11 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
 
     try {
       await updateGlobalSettings({ favoriteProviders, favoriteModels: newFavorites });
+      await refresh();
     } catch {
       setFavoriteModels(currentFavorites);
     }
-  }, [favoriteModels, favoriteProviders]);
+  }, [favoriteModels, favoriteProviders, refresh]);
 
   const handleSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -945,6 +908,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     searchQuery,
     setSearchQuery,
     filteredSessions,
+    agentsMap: chatAgentsMap,
   } = useChat(projectId, addToast);
 
   const [showNewDialog, setShowNewDialog] = useState(false);
@@ -978,10 +942,11 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(CHAT_SIDEBAR_DEFAULT_WIDTH);
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
-  const [agentsMap, setAgentsMap] = useState<Map<string, Agent>>(new Map());
-  const [defaultModel, setDefaultModel] = useState<DefaultModelSelection>({ provider: null, modelId: null });
-  const [discoveredSkills, setDiscoveredSkills] = useState<DiscoveredSkill[]>([]);
-  const [skillsLoading, setSkillsLoading] = useState(true);
+  const { agentsMap: cachedAgentsMap } = useAgentsMapCache(projectId);
+  const agentsMap = useMemo(() => (chatAgentsMap.size > 0 ? chatAgentsMap : cachedAgentsMap), [cachedAgentsMap, chatAgentsMap]);
+  const { defaultProvider, defaultModelId } = useModelsCache();
+  const defaultModel = useMemo<DefaultModelSelection>(() => ({ provider: defaultProvider, modelId: defaultModelId }), [defaultModelId, defaultProvider]);
+  const { skills: discoveredSkills, loading: skillsLoading } = useDiscoveredSkillsCache(projectId);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillFilter, setSkillFilter] = useState("");
   const [highlightedSkillIndex, setHighlightedSkillIndex] = useState(0);
@@ -1532,79 +1497,6 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   }, [roomThreadActive, anchorToBottom, activeSession?.id, chatScope]);
 
   // Fetch agents on mount for name resolution (project-scoped with stale-request protection)
-  useEffect(() => {
-    let cancelled = false;
-    const currentProjectId = projectId;
-    fetchAgents(undefined, projectId)
-      .then((agents) => {
-        // Ignore response if project changed during fetch
-        if (cancelled || currentProjectId !== projectId) return;
-        const map = new Map<string, Agent>();
-        for (const agent of agents) {
-          map.set(agent.id, agent);
-        }
-        setAgentsMap(map);
-      })
-      .catch(() => {
-        // Silently fail - keep empty map
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetchModels()
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-        setDefaultModel({
-          provider: response.defaultProvider ?? null,
-          modelId: response.defaultModelId ?? null,
-        });
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
-        }
-        setDefaultModel({ provider: null, modelId: null });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Fetch discovered skills for slash command autocomplete
-  useEffect(() => {
-    let cancelled = false;
-    setSkillsLoading(true);
-
-    fetchDiscoveredSkills(projectId)
-      .then((skills) => {
-        if (!cancelled) {
-          setDiscoveredSkills(skills);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setDiscoveredSkills([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setSkillsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
   useEffect(() => {
     pendingAttachmentsRef.current = pendingAttachments;
   }, [pendingAttachments]);
