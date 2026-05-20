@@ -22,6 +22,7 @@ vi.mock("../../api", () => ({
   cancelChatResponse: vi.fn(),
   fetchModels: vi.fn(),
   fetchDiscoveredSkills: vi.fn(),
+  fetchTasks: vi.fn().mockResolvedValue([]),
   searchFiles: vi.fn().mockResolvedValue({ files: [] }),
   attachmentBaseUrlForRoom: vi.fn((roomId: string) => `/api/chat/rooms/${roomId}/attachments/`),
 }));

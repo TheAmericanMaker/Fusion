@@ -2157,6 +2157,29 @@ export function QuickChatFAB({
     [mentionStartPos, messageInput, resizeQuickChatComposer],
   );
 
+  const insertHashMention = useCallback(
+    (nextInput: string, insertedToken: string) => {
+      const input = inputRef.current;
+      const cursorPos = input?.selectionStart ?? mentionCursorPosRef.current;
+      const mentionStart = messageInput.lastIndexOf("#", cursorPos);
+      const nextCursorPos = mentionStart >= 0
+        ? mentionStart + insertedToken.length
+        : nextInput.length;
+
+      setMessageInput(nextInput);
+      fileMention.dismissMention();
+      setFileMentionPopupVisible(false);
+
+      window.requestAnimationFrame(() => {
+        if (!inputRef.current) return;
+        resizeQuickChatComposer(inputRef.current);
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(nextCursorPos, nextCursorPos);
+      });
+    },
+    [fileMention, messageInput, resizeQuickChatComposer],
+  );
+
   const handleInputChange = useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
       const nextValue = event.target.value;
@@ -2317,16 +2340,14 @@ export function QuickChatFAB({
       mentionCursorPosRef.current = event.currentTarget.selectionStart ?? mentionCursorPosRef.current;
 
       // Handle file mention popup keyboard navigation first
-      if (fileMention.mentionActive && fileMention.files.length > 0) {
+      if (fileMention.mentionActive && fileMention.combinedItems.length > 0) {
         fileMention.handleKeyDown(event, messageInput);
         if (event.key === "Enter" || event.key === "Tab") {
-          // Select the highlighted file
-          const file = fileMention.files[fileMention.selectedIndex];
-          if (file) {
-            const newText = fileMention.selectFile(file, messageInput);
-            setMessageInput(newText);
-            fileMention.dismissMention();
-            setFileMentionPopupVisible(false);
+          const item = fileMention.combinedItems[fileMention.selectedIndex];
+          if (item?.kind === "task") {
+            insertHashMention(fileMention.selectTask(item.task, messageInput), `#${item.task.id}`);
+          } else if (item?.kind === "file") {
+            insertHashMention(fileMention.selectFile(item.file, messageInput), `#${item.file.path}`);
           }
         }
         return;
@@ -2407,6 +2428,7 @@ export function QuickChatFAB({
       handleMentionSelect,
       handleSendMessage,
       fileMention,
+      insertHashMention,
       messageInput,
       showSkillMenu,
       filteredSkills,
@@ -3070,14 +3092,14 @@ export function QuickChatFAB({
               <FileMentionPopup
                 visible={fileMention.mentionActive && !mentionPopupVisible}
                 position={fileMentionPosition}
+                tasks={fileMention.tasks}
                 files={fileMention.files}
                 selectedIndex={fileMention.selectedIndex}
-                onSelect={(file) => {
-                  const newText = fileMention.selectFile(file, messageInput);
-                  setMessageInput(newText);
-                  fileMention.dismissMention();
-                  setFileMentionPopupVisible(false);
-                  inputRef.current?.focus();
+                onSelectTask={(task) => {
+                  insertHashMention(fileMention.selectTask(task, messageInput), `#${task.id}`);
+                }}
+                onSelectFile={(file) => {
+                  insertHashMention(fileMention.selectFile(file, messageInput), `#${file.path}`);
                 }}
                 loading={fileMention.loading}
               />

@@ -104,6 +104,7 @@ vi.mock("../../api", () => ({
     { id: "agent-002", name: "Beta", role: "reviewer", state: "idle", icon: undefined, createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z", metadata: {} },
   ]),
   fetchDiscoveredSkills: vi.fn().mockResolvedValue([]),
+  fetchTasks: vi.fn().mockResolvedValue([]),
   searchFiles: vi.fn().mockResolvedValue({ files: [] }),
 }));
 

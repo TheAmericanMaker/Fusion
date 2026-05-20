@@ -1748,6 +1748,28 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     [mentionStartPos, messageInput, resizeComposer],
   );
 
+  const insertHashMention = useCallback(
+    (nextInput: string, insertedToken: string) => {
+      const textarea = inputRef.current;
+      const cursorPos = textarea?.selectionStart ?? mentionCursorPosRef.current;
+      const mentionStart = messageInput.lastIndexOf("#", cursorPos);
+      const nextCursorPos = mentionStart >= 0
+        ? mentionStart + insertedToken.length
+        : nextInput.length;
+
+      setMessageInput(nextInput);
+      fileMention.dismissMention();
+      setFileMentionPopupVisible(false);
+
+      window.requestAnimationFrame(() => {
+        if (!inputRef.current) return;
+        resizeComposer(inputRef.current);
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(nextCursorPos, nextCursorPos);
+      });
+    },
+    [fileMention, messageInput, resizeComposer],
+  );
 
   // Handle input key down
   const handleInputKeyDown = useCallback(
@@ -1755,16 +1777,14 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       mentionCursorPosRef.current = e.currentTarget.selectionStart ?? mentionCursorPosRef.current;
 
       // Handle file mention popup keyboard navigation first
-      if (fileMention.mentionActive && fileMention.files.length > 0) {
+      if (fileMention.mentionActive && fileMention.combinedItems.length > 0) {
         fileMention.handleKeyDown(e, messageInput);
         if (e.key === "Enter" || e.key === "Tab") {
-          // Select the highlighted file
-          const file = fileMention.files[fileMention.selectedIndex];
-          if (file) {
-            const newText = fileMention.selectFile(file, messageInput);
-            setMessageInput(newText);
-            fileMention.dismissMention();
-            setFileMentionPopupVisible(false);
+          const item = fileMention.combinedItems[fileMention.selectedIndex];
+          if (item?.kind === "task") {
+            insertHashMention(fileMention.selectTask(item.task, messageInput), `#${item.task.id}`);
+          } else if (item?.kind === "file") {
+            insertHashMention(fileMention.selectFile(item.file, messageInput), `#${item.file.path}`);
           }
         }
         return;
@@ -1854,6 +1874,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       handleSkillSelect,
       handleSendDispatch,
       fileMention,
+      insertHashMention,
       messageInput,
     ],
   );
@@ -3093,14 +3114,14 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 <FileMentionPopup
                   visible={fileMention.mentionActive && !mentionPopupVisible}
                   position={fileMentionPosition}
+                  tasks={fileMention.tasks}
                   files={fileMention.files}
                   selectedIndex={fileMention.selectedIndex}
-                  onSelect={(file) => {
-                    const newText = fileMention.selectFile(file, messageInput);
-                    setMessageInput(newText);
-                    fileMention.dismissMention();
-                    setFileMentionPopupVisible(false);
-                    inputRef.current?.focus();
+                  onSelectTask={(task) => {
+                    insertHashMention(fileMention.selectTask(task, messageInput), `#${task.id}`);
+                  }}
+                  onSelectFile={(file) => {
+                    insertHashMention(fileMention.selectFile(file, messageInput), `#${file.path}`);
                   }}
                   loading={fileMention.loading}
                 />

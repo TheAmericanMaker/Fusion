@@ -146,7 +146,7 @@ Chat Rooms are project-scoped group conversations for multiple agents. They are 
 Quick Chat is an optional floating panel for fast, project-scoped assistant conversations without leaving your current view.
 
 - Controlled by the project setting `showQuickChatFAB`
-- Supports agent mentions (`@agent`) and file mentions
+- Supports agent mentions (`@agent`) and shared `#` task/file mentions
 - Uses the same model/provider infrastructure as full Chat view
 - On small screens, compact tool-call summaries in the floating panel intentionally stay single-line (count + tool names + status) to preserve message density
 - The panel header uses a session-first flow: the main dropdown lists persisted sessions (preferring `session.title`, then falling back to deterministic `Session N` labels)

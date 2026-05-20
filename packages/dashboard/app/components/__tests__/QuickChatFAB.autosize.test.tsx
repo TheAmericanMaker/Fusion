@@ -9,6 +9,8 @@ vi.mock("../../api", async (importOriginal) => {
   return {
     ...actual,
     fetchDiscoveredSkills: vi.fn().mockResolvedValue([]),
+    fetchTasks: vi.fn().mockResolvedValue([]),
+    searchFiles: vi.fn().mockResolvedValue({ files: [] }),
     fetchModels: vi.fn().mockResolvedValue({
       models: [],
       favoriteProviders: [],
@@ -58,18 +60,18 @@ vi.mock("../../hooks/useAgents", () => ({
 vi.mock("../../hooks/useFileMention", () => ({
   useFileMention: vi.fn(() => ({
     mentionActive: false,
+    tasks: [],
     files: [],
+    combinedItems: [],
+    loading: false,
+    mentionQuery: "",
     selectedIndex: 0,
+    setSelectedIndex: vi.fn(),
     detectMention: vi.fn(),
     dismissMention: vi.fn(),
     handleKeyDown: vi.fn(),
+    selectTask: vi.fn((task: { id?: string }, text: string) => `${text}${task.id ?? ""}`),
     selectFile: vi.fn((file: { path?: string }, text: string) => `${text}${file.path ?? ""}`),
-    selectHighlighted: vi.fn(),
-    closeMention: vi.fn(),
-    openMention: vi.fn(),
-    hasResults: false,
-    isLoading: false,
-    query: "",
   })),
 }));
 
