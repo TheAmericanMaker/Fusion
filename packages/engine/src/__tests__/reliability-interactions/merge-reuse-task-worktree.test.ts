@@ -349,7 +349,7 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
     }
   }, 30_000);
 
-  it.skipIf(!hasGit)("falls back to cwd-main when reuse is requested without a task worktree", async () => {
+  it.skipIf(!hasGit)("reacquires a fresh task worktree when reuse is requested without a task worktree", async () => {
     const fixture = await makeReliabilityFixture({
       taskId: "FN-5353-RI-MISSING-WORKTREE",
       settings: {
@@ -382,12 +382,13 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
       expect((await store.getTask(task.id))?.column).toBe("done");
       const audits = store.getRunAuditEvents({ taskId: task.id });
       const auditTypes = audits.map((event) => event.mutationType);
-      expect(auditTypes).toContain("merge:reuse-fallback-cwd-main");
-      expect(auditTypes).not.toContain("merge:reuse-handoff-acquired");
-      const fallback = audits.find((event) => event.mutationType === "merge:reuse-fallback-cwd-main");
+      expect(auditTypes).toContain("merge:reuse-fallback-new-worktree");
+      expect(auditTypes).toContain("merge:reuse-handoff-acquired");
+      expect(auditTypes).not.toContain("merge:reuse-fallback-cwd-main");
+      const fallback = audits.find((event) => event.mutationType === "merge:reuse-fallback-new-worktree");
       expect(fallback?.metadata).toMatchObject({
         reason: "missing-task-worktree",
-        worktreePath: null,
+        source: "fresh",
         integrationBranch: "master",
       });
     } finally {
