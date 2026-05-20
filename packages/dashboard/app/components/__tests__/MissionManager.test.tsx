@@ -1457,6 +1457,54 @@ describe("MissionManager", () => {
     });
   });
 
+  it("unwraps envelope-shaped mission list responses without crashing", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/missions/health")) {
+        return Promise.resolve(mockApiResponse(mockMissionHealthById));
+      }
+
+      if (url.includes("/events")) {
+        return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url)));
+      }
+
+      if (url.includes("/api/missions/") && !url.includes("/milestones") && !url.includes("/status")) {
+        return Promise.resolve(mockApiResponse(mockMissionDetail));
+      }
+
+      return Promise.resolve(mockApiResponse({ data: mockMissions }));
+    });
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Build Auth System")).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to the empty state when mission list fetch returns undefined", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/missions/health")) {
+        return Promise.resolve(mockApiResponse(mockMissionHealthById));
+      }
+
+      if (url.includes("/events")) {
+        return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url)));
+      }
+
+      if (url.includes("/api/missions/") && !url.includes("/milestones") && !url.includes("/status")) {
+        return Promise.resolve(mockApiResponse(mockMissionDetail));
+      }
+
+      return Promise.resolve(mockApiResponse(undefined));
+    });
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("No missions yet")).toBeInTheDocument();
+    });
+  });
+
   it("calls onClose when close button is clicked", async () => {
     globalThis.fetch = createFetchMock();
     const onClose = vi.fn();
@@ -2462,6 +2510,27 @@ describe("MissionManager", () => {
 
     expect(await screen.findByText("No missions yet")).toBeInTheDocument();
     expect(screen.queryByText("Drafts")).not.toBeInTheDocument();
+  });
+
+  it("unwraps mission list envelopes without crashing", async () => {
+    mockFetchMissionInterviewDrafts.mockResolvedValueOnce([]);
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/missions/health")) {
+        return Promise.resolve(mockApiResponse({}));
+      }
+      if (url.includes("/events")) {
+        return Promise.resolve(mockApiResponse(parseMissionEventsResponse(url)));
+      }
+      if (url.includes("/api/missions/") && !url.includes("/milestones") && !url.includes("/status")) {
+        return Promise.resolve(mockApiResponse(mockMissionDetail));
+      }
+      return Promise.resolve(mockApiResponse({ data: mockMissions }));
+    });
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    expect(await screen.findByText("Build Auth System")).toBeInTheDocument();
+    expect(screen.queryByText("No missions yet")).not.toBeInTheDocument();
   });
 
   it("logs a warning when pending interview session fetch fails", async () => {

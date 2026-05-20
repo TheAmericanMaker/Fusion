@@ -814,7 +814,11 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       const fetched = await fetchMissions(projectId);
       // Defensive: API helpers can return an envelope or non-array under
       // failure paths; downstream code (render, filter) assumes an array.
-      const data = Array.isArray(fetched) ? fetched : [];
+      const data = Array.isArray(fetched)
+        ? fetched
+        : fetched && Array.isArray((fetched as { data?: unknown }).data)
+          ? ((fetched as { data: MissionWithSummary[] }).data)
+          : [];
       setMissions(data);
       writeCache(
         missionsCacheKey,

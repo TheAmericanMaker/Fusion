@@ -1794,10 +1794,61 @@ describe("TaskDetailModal", () => {
     });
   });
 
-  // Skipped: the Stats tab timing math has drifted from the expected
-  // "4m 0s" / "5m 0s" formatting; tracked alongside TaskTokenStatsPanel
-  // execution-window work.
-  // Replaced with stub: original assertions deferred (see git history). Restore once underlying feature/bug work lands.
-  it("renders corrected stats timing totals in Stats tab", () => { expect(true).toBe(true); });
+  it("renders corrected stats timing totals in Stats tab", async () => {
+    const { fetchTaskDetail } = await import("../../api");
+    const mockFetch = vi.mocked(fetchTaskDetail);
+
+    const task: Task = {
+      id: "FN-206",
+      description: "Stats timing regression",
+      column: "done",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    } as Task;
+
+    mockFetch.mockResolvedValueOnce({
+      ...task,
+      prompt: "# Async Spec\n\nStats timing regression.",
+      executionStartedAt: "2026-05-15T13:10:00.000Z",
+      executionCompletedAt: "2026-05-15T13:14:00.000Z",
+      timedExecutionMs: 120_000,
+      workflowStepResults: [
+        {
+          workflowStepId: "WS-201",
+          workflowStepName: "Workflow QA",
+          status: "passed",
+          startedAt: "2026-05-15T13:11:00.000Z",
+          completedAt: "2026-05-15T13:12:00.000Z",
+        },
+      ],
+    } as TaskDetail);
+
+    render(
+      <TaskDetailModal
+        task={task}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading specification…")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stats" }));
+
+    await waitFor(() => {
+      const metric = screen.getByText("Total execution time").closest(".task-token-stats-panel__metric");
+      expect(metric).toHaveTextContent("4m 0s");
+    });
+  });
 
 });

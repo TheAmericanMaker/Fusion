@@ -13,6 +13,7 @@ const mockFetchMilestoneValidation = vi.fn();
 const mockFetchMilestoneValidationTelemetry = vi.fn();
 const mockFetchAiSessions = vi.fn();
 const mockFetchAiSession = vi.fn();
+const mockFetchMissionInterviewDrafts = vi.fn();
 const mockSubscribeSse = vi.fn(() => vi.fn());
 
 vi.mock("../../hooks/useViewportMode", () => ({
@@ -43,6 +44,7 @@ vi.mock("../../api", async (importOriginal) => {
     fetchMilestoneValidationTelemetry: (...args: unknown[]) => mockFetchMilestoneValidationTelemetry(...args),
     fetchAiSessions: (...args: unknown[]) => mockFetchAiSessions(...args),
     fetchAiSession: (...args: unknown[]) => mockFetchAiSession(...args),
+    fetchMissionInterviewDrafts: (...args: unknown[]) => mockFetchMissionInterviewDrafts(...args),
     fetchModels: vi.fn().mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] }),
   };
 });
@@ -121,6 +123,7 @@ describe("MissionManager mobile swipe-back", () => {
     mockFetchMilestoneValidationTelemetry.mockResolvedValue(null);
     mockFetchAiSessions.mockResolvedValue([]);
     mockFetchAiSession.mockResolvedValue(null);
+    mockFetchMissionInterviewDrafts.mockResolvedValue([]);
     window.history.pushState = vi.fn();
   });
 
@@ -128,10 +131,28 @@ describe("MissionManager mobile swipe-back", () => {
     window.history.pushState = originalPushState;
   });
 
-  // Skipped: popstate currently keeps milestone content rendered instead
-  // of restoring the list view; mobile-nav state bug under FN-5110.
-  // Replaced with stub: original assertions deferred (see git history). Restore once underlying feature/bug work lands.
-  it("pushes a mobile nav entry when opening mission detail and popstate returns to the list", async () => { expect(true).toBe(true); });
+  it("pushes a mobile nav entry when opening mission detail and popstate returns to the list", async () => {
+    render(
+      <HistoryHarness>
+        <MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} isInline={true} />
+      </HistoryHarness>,
+    );
+
+    await userSelectMission();
+    await waitFor(() => {
+      expect(screen.getByText("Database Schema")).toBeInTheDocument();
+    });
+    expect(window.history.pushState).toHaveBeenCalledWith({ navIndex: 1 }, "");
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Database Schema")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Build Auth System")).toBeInTheDocument();
+  });
 
   it("does not push a nav entry on desktop mission selection", async () => {
     mockViewportMode.mockReturnValue("desktop");

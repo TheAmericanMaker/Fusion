@@ -162,10 +162,32 @@ describe("TaskTokenStatsPanel", () => {
     expect(screen.getAllByText("4m 0s").length).toBeGreaterThan(0);
   });
 
-  // Skipped: total execution time rendering math doesn't currently produce
-  // the expected "5m 0s" label from the end-to-end window inputs.
-  // Replaced with stub: original assertions deferred (see git history). Restore once underlying feature/bug work lands.
-  it("uses end-to-end execution window for total execution time when available", () => { expect(true).toBe(true); });
+  it("uses end-to-end execution window for total execution time when available", () => {
+    render(
+      <TaskTokenStatsPanel
+        loading={false}
+        tokenUsage={undefined}
+        task={makeTask({
+          column: "done",
+          executionStartedAt: "2026-05-15T13:10:00.000Z",
+          executionCompletedAt: "2026-05-15T13:15:00.000Z",
+          timedExecutionMs: 120_000,
+          workflowStepResults: [
+            {
+              workflowStepId: "WS-150",
+              workflowStepName: "Workflow QA",
+              status: "passed",
+              startedAt: "2026-05-15T13:12:00.000Z",
+              completedAt: "2026-05-15T13:13:00.000Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const metric = screen.getByText("Total execution time").closest(".task-token-stats-panel__metric");
+    expect(metric).toHaveTextContent("5m 0s");
+  });
 
   it("shows cumulative active runtime for in-progress tasks", () => {
     vi.useFakeTimers();

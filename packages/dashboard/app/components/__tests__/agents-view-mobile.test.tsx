@@ -283,7 +283,7 @@ describe("agents-view mobile CSS", () => {
     expect(extractRuleBlock(mobileMediaBlock, ".agent-org-chart-controls")).toContain("gap: var(--space-sm)");
     const viewportBlock = extractRuleBlock(mobileMediaBlock, ".agent-org-chart-viewport");
     expect(viewportBlock).toContain("min-height: calc(var(--space-2xl) * 4)");
-    expect(viewportBlock).toContain("overflow: hidden");
+    expect(viewportBlock).toContain("overflow: auto");
     expect(viewportBlock).toContain("overscroll-behavior: contain");
     expect(viewportBlock).toContain("-webkit-overflow-scrolling: touch");
     expect(extractRuleBlock(mobileMediaBlock, ".agent-org-chart")).toContain("gap: var(--space-sm)");

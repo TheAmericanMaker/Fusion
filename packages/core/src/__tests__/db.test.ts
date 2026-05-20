@@ -353,9 +353,9 @@ describe("Database", () => {
       expect(row.nextId).toBe(42);
     });
 
-    it("sets wal_autocheckpoint to 100", () => {
+    it("sets wal_autocheckpoint to 1000", () => {
       const row = db.prepare("PRAGMA wal_autocheckpoint").get() as { wal_autocheckpoint: number };
-      expect(row.wal_autocheckpoint).toBe(100);
+      expect(row.wal_autocheckpoint).toBe(1000);
     });
 
     it("sets journal_size_limit to 4 MB", () => {
@@ -363,9 +363,9 @@ describe("Database", () => {
       expect(row.journal_size_limit).toBe(4194304);
     });
 
-    it("sets synchronous to NORMAL (1)", () => {
+    it("sets synchronous to FULL (2)", () => {
       const row = db.prepare("PRAGMA synchronous").get() as { synchronous: number };
-      expect(row.synchronous).toBe(1); // NORMAL = 1
+      expect(row.synchronous).toBe(2); // FULL = 2
     });
 
     it("sets busy_timeout to 5000ms", () => {
