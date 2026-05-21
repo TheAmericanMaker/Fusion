@@ -577,6 +577,63 @@ export async function classifyOwnedLandedEvidence(
     return { kind: "proven-no-op", baseRef: mergeTargetBranch, ownDiffEmpty: true };
   }
 
+  // FN-5345/FN-5377: empty-own-diff detection.
+  //
+  // A branch with one or more own commits whose net tree change vs its own
+  // merge-base with the integration branch is empty (e.g. a verification-only
+  // task that produced a `git commit --allow-empty` handoff commit) is
+  // logically equivalent to `proven-no-op` — there is nothing to land.
+  //
+  // We require the merge-base to be reachable from the integration target so
+  // we never claim no-op for a branch rooted off some other ref. This pairs
+  // with the FN-5345/FN-5377 pre-commit empty-commit refusal hook (which
+  // prevents the bad state from being created going forward) and recovers
+  // any tasks already wedged in this state.
+  if (aheadCount !== null && aheadCount > 0) {
+    try {
+      const { stdout: mergeBaseOut } = await execFileAsync(
+        "git",
+        ["merge-base", mergeTargetBranch, branch],
+        { cwd: rootDir, encoding: "utf-8" },
+      );
+      const mergeBase = mergeBaseOut.trim();
+      if (mergeBase) {
+        let ownDiffEmpty = false;
+        try {
+          await execFileAsync(
+            "git",
+            ["diff", "--quiet", `${mergeBase}..${branch}`],
+            { cwd: rootDir },
+          );
+          ownDiffEmpty = true;
+        } catch {
+          // exit non-zero — net diff exists, NOT empty-own-diff
+          ownDiffEmpty = false;
+        }
+        if (ownDiffEmpty) {
+          let mergeBaseReachable = baseReachableFromTarget;
+          if (!mergeBaseReachable) {
+            try {
+              await execFileAsync(
+                "git",
+                ["merge-base", "--is-ancestor", mergeBase, mergeTargetBranch],
+                { cwd: rootDir },
+              );
+              mergeBaseReachable = true;
+            } catch {
+              mergeBaseReachable = false;
+            }
+          }
+          if (mergeBaseReachable) {
+            return { kind: "proven-no-op", baseRef: mergeTargetBranch, ownDiffEmpty: true };
+          }
+        }
+      }
+    } catch {
+      // merge-base lookup failed — fall through to existing classifications
+    }
+  }
+
   let branchExists = false;
   try {
     await execFileAsync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: rootDir });
@@ -6401,6 +6458,142 @@ export async function aiMergeTask(
     }
   };
 
+  // FN-5345/FN-5377: early empty-own-diff fast-path.
+  //
+  // Detect branches whose own commits introduce zero net tree change vs their
+  // merge-base with the integration target ("empty-own-diff") BEFORE attempting
+  // any reuse-handoff acquisition. This unsticks tasks where a stale empty
+  // handoff commit (e.g. a verification-only task that committed --allow-empty)
+  // combined with drifted worktree<->branch mapping would otherwise wedge the
+  // handoff gate with `registered-branch-mismatch` and ultimately escalate to
+  // `merge-deadlock-detected: verified content not on main` after FN-4999
+  // completion-handoff-limbo recovery exhausts.
+  //
+  // Scope is narrow on purpose:
+  //   - ONLY in reuse-task-worktree integration mode (where the wedge lives).
+  //   - ONLY when the branch exists, is ahead of the integration target by >= 1
+  //     commit, and `git diff --quiet <mergeBase>..<branchTip>` reports an
+  //     empty net diff.
+  //   - aheadCount === 0 (already-landed) and missing-branch (no-changes-finalized)
+  //     still go through the standard reuse-handoff path so the existing
+  //     handoff lease lifecycle and FN-5083 branch-rebind invariants are
+  //     preserved.
+  //   - cwd-main integration mode (legacy / unit-test default) is unchanged.
+  const earlyFastPathEligible = settings.mergeIntegrationWorktree !== "cwd-main";
+  try {
+    if (!earlyFastPathEligible) throw new Error("skip-early-fast-path:not-reuse-mode");
+    const earlyBranch = task.branch || canonicalFusionBranchName(taskId);
+    let earlyBranchExists = false;
+    try {
+      await execAsync(
+        `git show-ref --verify --quiet ${quoteArg(`refs/heads/${earlyBranch}`)}`,
+        { cwd: projectRootDir, timeout: 30_000 },
+      );
+      earlyBranchExists = true;
+    } catch {
+      earlyBranchExists = false;
+    }
+    if (earlyBranchExists) {
+      let earlyAheadCount: number | null = null;
+      try {
+        const { stdout } = await execAsync(
+          `git rev-list --count ${quoteArg(`${mergeTarget.branch}..${earlyBranch}`)}`,
+          { cwd: projectRootDir, encoding: "utf-8", timeout: 30_000 },
+        );
+        const parsed = Number.parseInt(stdout.trim(), 10);
+        if (Number.isFinite(parsed)) earlyAheadCount = parsed;
+      } catch {
+        earlyAheadCount = null;
+      }
+      if (earlyAheadCount !== null && earlyAheadCount > 0) {
+        let earlyMergeBase = "";
+        try {
+          const { stdout } = await execAsync(
+            `git merge-base ${quoteArg(mergeTarget.branch)} ${quoteArg(earlyBranch)}`,
+            { cwd: projectRootDir, encoding: "utf-8", timeout: 30_000 },
+          );
+          earlyMergeBase = stdout.trim();
+        } catch {
+          earlyMergeBase = "";
+        }
+        if (earlyMergeBase) {
+          let earlyOwnDiffEmpty = false;
+          try {
+            await execAsync(
+              `git diff --quiet ${quoteArg(`${earlyMergeBase}..${earlyBranch}`)}`,
+              { cwd: projectRootDir, timeout: 30_000 },
+            );
+            earlyOwnDiffEmpty = true;
+          } catch {
+            earlyOwnDiffEmpty = false;
+          }
+          if (earlyOwnDiffEmpty) {
+            const noOpReason = `early fast-path: branch ${earlyBranch} has ${earlyAheadCount} own commit(s) but zero net diff vs merge-base of ${mergeTarget.branch}`;
+            const mergeDetails: MergeDetails = {
+              ...(task.mergeDetails || {}),
+              mergeConfirmed: true,
+              noOpMerge: true,
+              noOpReason,
+              landedFiles: [],
+              mergedAt: new Date().toISOString(),
+              prNumber: task.prInfo?.number,
+              mergeTargetBranch: mergeTarget.branch,
+            };
+            await store.updateTask(taskId, { mergeDetails, modifiedFiles: [] });
+            await store.logEntry(
+              taskId,
+              `Auto-finalized no-op (early fast-path, FN-5345/FN-5377): ${noOpReason}`,
+            );
+            try {
+              await audit.database({
+                type: "task:auto-recover-finalize-already-on-main",
+                target: taskId,
+                metadata: {
+                  phase: "merge",
+                  reason: "empty-own-diff-early-fast-path",
+                  baseRef: mergeTarget.branch,
+                  branch: earlyBranch,
+                  aheadCount: earlyAheadCount,
+                  mergeBase: earlyMergeBase,
+                },
+              });
+            } catch (auditErr: unknown) {
+              mergerLog.warn(
+                `${taskId}: failed to emit empty-own-diff-early-fast-path audit: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+              );
+            }
+            const result: MergeResult = {
+              task,
+              branch: earlyBranch,
+              merged: true,
+              noOp: true,
+              worktreeRemoved: false,
+              branchDeleted: false,
+              mergeConfirmed: true,
+              noOpMerge: true,
+              noOpReason,
+              mergedAt: mergeDetails.mergedAt,
+              mergeTargetBranch: mergeTarget.branch,
+            };
+            await completeTask(store, taskId, result);
+            return result;
+          }
+        }
+      }
+    }
+  } catch (earlyErr: unknown) {
+    // Fail-soft: any error falls through to the existing merge path.
+    // (The "skip-early-fast-path:not-reuse-mode" sentinel is the cwd-main bypass
+    // and is intentionally silent.)
+    if (earlyErr instanceof Error && earlyErr.message.startsWith("skip-early-fast-path:")) {
+      // intentional bypass
+    } else {
+      mergerLog.warn(
+        `${taskId}: early empty-own-diff fast-path failed; falling through to standard merge path: ${earlyErr instanceof Error ? earlyErr.message : String(earlyErr)}`,
+      );
+    }
+  }
+
   const requestedIntegrationMode = settings.mergeIntegrationWorktree === "cwd-main"
     ? "cwd-main"
     : "reuse-task-worktree";
@@ -6420,6 +6613,124 @@ export async function aiMergeTask(
     reason: string,
     diagnostics: Record<string, unknown>,
   ): Promise<void> => {
+    // FN-5345/FN-5377: consult existing registration of `fusion/<id>` before
+    // creating a fresh worktree. If the branch is already registered at a
+    // usable extant path, rebind `task.worktree` to it (avoids FN-5083-class
+    // double-registration where two worktrees both claim the same branch and
+    // the next handoff gate refuses with `registered-branch-mismatch`).
+    //
+    // If registered at a stale/missing path, run `git worktree prune` so the
+    // subsequent `worktree add -f` does not produce a duplicate admin entry.
+    const expectedBranch = task.branch || canonicalFusionBranchName(taskId);
+    try {
+      const { stdout: porcelain } = await execAsync(
+        `git worktree list --porcelain`,
+        { cwd: projectRootDir, encoding: "utf-8", timeout: 30_000 },
+      );
+      const entries: { path?: string; branch?: string }[] = [];
+      let current: { path?: string; branch?: string } = {};
+      for (const line of porcelain.split("\n")) {
+        if (line.startsWith("worktree ")) {
+          if (current.path) entries.push(current);
+          current = { path: line.slice("worktree ".length).trim() };
+        } else if (line.startsWith("branch ")) {
+          // refs/heads/fusion/fn-5345 -> fusion/fn-5345
+          current.branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
+        } else if (line.trim() === "") {
+          if (current.path) {
+            entries.push(current);
+            current = {};
+          }
+        }
+      }
+      if (current.path) entries.push(current);
+      const expectedLower = expectedBranch.toLowerCase();
+      const matches = entries.filter((e) => (e.branch || "").toLowerCase() === expectedLower);
+      let prunedAnyStaleRegistration = false;
+      let reusableMatch: { path: string; branch: string } | null = null;
+      for (const match of matches) {
+        if (!match.path) continue;
+        const exists = existsSync(match.path);
+        if (!exists) {
+          prunedAnyStaleRegistration = true;
+          continue;
+        }
+        const cls = await classifyTaskWorktree(projectRootDir, match.path);
+        if (cls.ok) {
+          reusableMatch = { path: match.path, branch: match.branch || expectedBranch };
+          break;
+        }
+        prunedAnyStaleRegistration = true;
+      }
+      if (prunedAnyStaleRegistration) {
+        try {
+          await execAsync(`git worktree prune`, { cwd: projectRootDir, encoding: "utf-8", timeout: 30_000 });
+          await emitReuseHandoffAuditEvent(
+            "merge:reuse-fallback-new-worktree",
+            {
+              taskId,
+              reason: "pruned-stale-branch-registration",
+              branch: expectedBranch,
+              diagnostics: { matches: matches.map((m) => ({ path: m.path, branch: m.branch })) },
+              prePrune: true,
+            },
+            projectRootDir,
+          );
+        } catch (pruneErr) {
+          mergerLog.warn(
+            `${taskId}: git worktree prune failed before reacquire: ${pruneErr instanceof Error ? pruneErr.message : String(pruneErr)}`,
+          );
+        }
+      }
+      if (reusableMatch) {
+        // Reuse the extant registration directly. Skip acquireTaskWorktree's
+        // fresh-create path so we don't double-register the branch.
+        task.worktree = reusableMatch.path;
+        task.branch = reusableMatch.branch;
+        branch = reusableMatch.branch;
+        integrationRoot = {
+          ...integrationRoot,
+          mode: "reuse-task-worktree",
+          rootDir: reusableMatch.path,
+          branchName: reusableMatch.branch,
+        };
+        reuseTaskWorktreeMerge = true;
+        rootDir = reusableMatch.path;
+        integrationRemote = await resolveIntegrationRemote({
+          settings,
+          rootDir,
+          integrationBranch: mergeTarget.branch,
+        });
+        await store.updateTask(taskId, { worktree: reusableMatch.path, branch: reusableMatch.branch });
+        await emitReuseHandoffAuditEvent(
+          "merge:reuse-fallback-new-worktree",
+          {
+            taskId,
+            reason: `${reason}:reused-existing-registration`,
+            branch: reusableMatch.branch,
+            worktreePath: reusableMatch.path,
+            source: "existing",
+            diagnostics,
+            integrationRemote: integrationRemote ?? null,
+            integrationBranch: mergeTarget.branch,
+          },
+          reusableMatch.path,
+        );
+        await store.recordActivity({
+          type: "task:merge-worktree-reacquired",
+          taskId,
+          taskTitle: task.title,
+          details: `Merge worktree reacquired from existing registration: ${reason}`,
+          metadata: { reason, branch: reusableMatch.branch, worktreePath: reusableMatch.path, source: "existing" },
+        });
+        return;
+      }
+    } catch (listErr) {
+      mergerLog.warn(
+        `${taskId}: git worktree list consult failed before reacquire; proceeding with fresh creation: ${listErr instanceof Error ? listErr.message : String(listErr)}`,
+      );
+    }
+
     const acquisition = await acquireTaskWorktree({
       task,
       rootDir: projectRootDir,

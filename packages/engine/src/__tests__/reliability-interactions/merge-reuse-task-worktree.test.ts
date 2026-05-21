@@ -505,4 +505,85 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
       await fixture.cleanup();
     }
   }, 20_000);
+
+  // FN-5345/FN-5377 regression backstop.
+  //
+  // A verification-only task that committed `--allow-empty` produced a branch
+  // with own-commit-count >= 1 but zero net tree change vs merge-base. Combined
+  // with drifted worktree<->branch mapping, the reuse-handoff gate would refuse
+  // with `registered-branch-mismatch` and the task would escalate to
+  // `merge-deadlock-detected: verified content not on main` after FN-4999
+  // completion-handoff-limbo recovery exhausts. The early empty-own-diff
+  // fast-path must finalize this BEFORE any reuse-handoff acquisition runs.
+  it.skipIf(!hasGit)(
+    "FN-5345: empty-own-diff branch auto-finalizes via early fast-path without acquiring reuse handoff",
+    async () => {
+      const fixture = await makeReliabilityFixture({
+        taskId: "FN-5279-RI-EMPTY-OWN-DIFF",
+        settings: {
+          baseBranch: "master",
+          mergeIntegrationWorktree: "reuse-task-worktree",
+        } as any,
+      });
+
+      try {
+        const { rootDir, store, task } = fixture;
+        const actualTask = await store.getTask(task.id);
+        const branch = `fusion/${actualTask!.id.toLowerCase()}`;
+        const worktreeRoot = `${rootDir}-worktrees`;
+        const worktreePath = join(worktreeRoot, actualTask!.id.toLowerCase());
+
+        git(rootDir, "git branch -m main master");
+        const completedSteps = (actualTask?.steps ?? []).map((step) => ({ ...step, status: "done" as const }));
+        await store.updateTask(task.id, {
+          baseBranch: "master",
+          branch,
+          steps: completedSteps,
+          currentStep: completedSteps.length,
+        } as any);
+        await fixture.createBranch(branch);
+        // Produce an empty handoff commit on the branch: own_commit_count == 1
+        // but `git diff --quiet mergeBase..branch` exits 0 (no net change).
+        git(rootDir, `git commit --allow-empty -m 'test(${actualTask!.id}): verification-only handoff'`);
+        await fixture.checkout("master");
+
+        // Set up the worktree mapping in a way that would normally wedge the
+        // reuse-handoff gate (FN-5345 scenario): worktree mapped to a
+        // not-yet-created path so classifyTaskWorktree would report `missing`,
+        // forcing reacquire-fallback into FN-5083-class branch-registration drift.
+        await store.updateTask(task.id, {
+          worktree: join(worktreeRoot, "drifted-missing-path"),
+          branch,
+        } as any);
+        store.enqueueMergeQueue(task.id);
+
+        const result = await aiMergeTask(store, rootDir, task.id);
+
+        expect(result.merged).toBe(true);
+        expect(result.noOp).toBe(true);
+        expect(result.mergeConfirmed).toBe(true);
+        expect((await store.getTask(task.id))?.column).toBe("done");
+
+        const audits = store.getRunAuditEvents({ taskId: task.id });
+        const auditTypes = audits.map((event) => event.mutationType);
+
+        // Early fast-path must short-circuit BEFORE any reuse-handoff event.
+        expect(auditTypes).not.toContain("merge:reuse-handoff-acquired");
+        expect(auditTypes).not.toContain("merge:reuse-handoff-refused");
+        expect(auditTypes).not.toContain("merge:reuse-fallback-new-worktree");
+
+        // Records the auto-finalize audit with the empty-own-diff reason.
+        const finalize = audits.find(
+          (event) =>
+            event.mutationType === "task:auto-recover-finalize-already-on-main"
+            && (event.metadata as any)?.reason === "empty-own-diff-early-fast-path",
+        );
+        expect(finalize).toBeDefined();
+        expect((finalize?.metadata as any)?.aheadCount).toBeGreaterThanOrEqual(1);
+      } finally {
+        await fixture.cleanup();
+      }
+    },
+    30_000,
+  );
 });

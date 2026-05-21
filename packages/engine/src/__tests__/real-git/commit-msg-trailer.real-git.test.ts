@@ -29,24 +29,30 @@ describe("commit-msg trailer hook (real git)", () => {
         taskAttributionTrailerName: "Fusion-Task-Id",
       });
 
-      git(worktreeDir, "git commit --allow-empty -m 'feat(KB-7): first'");
+      // FN-5345/FN-5377: pre-commit hook now refuses empty commits in fusion
+      // worktrees, so this test stages a real file change for each commit
+      // instead of using --allow-empty. The trailer-hook behavior under test
+      // is unchanged.
+      writeFileSync(join(worktreeDir, "step1.txt"), "first\n");
+      git(worktreeDir, "git add step1.txt && git commit -m 'feat(KB-7): first'");
       const firstBody = git(worktreeDir, "git log -1 --format=%B");
       expect(firstBody).toContain("Fusion-Task-Id: KB-7");
       const firstTrailers = git(worktreeDir, "git log -1 --format=%B | git interpret-trailers --parse");
       expect(firstTrailers).toContain("Fusion-Task-Id: KB-7");
 
-      git(worktreeDir, "git commit --amend --no-edit --allow-empty");
+      git(worktreeDir, "git commit --amend --no-edit");
       const amendNoEditBody = git(worktreeDir, "git log -1 --format=%B");
       expect((amendNoEditBody.match(/Fusion-Task-Id:\s*KB-7/g) ?? []).length).toBe(1);
 
-      git(worktreeDir, "git commit --amend -m 'feat(KB-7): rewritten' --allow-empty");
+      git(worktreeDir, "git commit --amend -m 'feat(KB-7): rewritten'");
       const rewrittenBody = git(worktreeDir, "git log -1 --format=%B");
       expect(rewrittenBody).toContain("feat(KB-7): rewritten");
       expect((rewrittenBody.match(/Fusion-Task-Id:\s*KB-7/g) ?? []).length).toBe(1);
 
       const taskFile = git(worktreeDir, "git rev-parse --git-path fusion-task-id");
       writeFileSync(isAbsolute(taskFile) ? taskFile : resolve(worktreeDir, taskFile), "kb-7\n");
-      git(worktreeDir, "git commit --allow-empty -m 'feat(KB-7): lowercase metadata' --allow-empty");
+      writeFileSync(join(worktreeDir, "step2.txt"), "lowercase\n");
+      git(worktreeDir, "git add step2.txt && git commit -m 'feat(KB-7): lowercase metadata'");
       const lowercaseBody = git(worktreeDir, "git log -1 --format=%B");
       expect(lowercaseBody).toContain("Fusion-Task-Id: KB-7");
 

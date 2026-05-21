@@ -7,6 +7,7 @@ const execAsync = promisify(exec);
 
 export const DEFAULT_ALLOWED_BRANCH_PATTERNS = ["^fusion/step-\\d+-[a-z0-9-]+$"] as const;
 const COMMIT_MSG_HOOK_MARKER = "# fusion-managed-commit-msg-hook";
+const PREPARE_COMMIT_MSG_HOOK_MARKER = "# fusion-managed-prepare-commit-msg-hook";
 
 function toShellCasePattern(pattern: string): string {
   return pattern
@@ -35,6 +36,12 @@ TASK_FILE=$(git rev-parse --git-path fusion-task-id)
 if [ ! -f "$TASK_FILE" ]; then
   exit 0
 fi
+
+# Note: empty-commit refusal (FN-5345/FN-5377) lives in the
+# prepare-commit-msg hook (installed by installTaskWorktreeIdentityGuard).
+# That hook gets the commit-source argument and can distinguish 'amend' /
+# 'merge' / 'squash' (which legitimately may produce empty commits) from
+# new commits with --allow-empty.
 
 WORKTREE_TASK_ID=$(cat "$TASK_FILE")
 # Keep this canonicalized in lockstep with canonicalFusionBranchName(taskId)
@@ -71,6 +78,66 @@ async function resolveGitPath(worktreePath: string, gitPath: string): Promise<st
   } catch (error) {
     throw new Error(`Failed to resolve git path '${gitPath}' for worktree ${worktreePath}: ${(error as Error).message}`);
   }
+}
+
+/**
+ * Build the shared prepare-commit-msg empty-commit guard hook.
+ *
+ * Refuses to author empty commits in fusion-managed task worktrees. A
+ * verification-only task that finds no repro should leave own-commits at 0
+ * and let the merger's empty-own-diff / proven-no-op classifier finalize it.
+ * Manufacturing an empty handoff commit (e.g. `git commit --allow-empty`)
+ * defeats that classifier and wedges the task in the merge path (FN-5345).
+ *
+ * prepare-commit-msg gets the commit-source argument so we can correctly
+ * allow legitimate empty commits during amend / merge / squash / template
+ * paths and only refuse new --allow-empty commits.
+ */
+export function buildPrepareCommitMsgEmptyGuardHook(taskId: string): string {
+  return `#!/bin/sh
+set -eu
+${PREPARE_COMMIT_MSG_HOOK_MARKER}
+# fusion-task-id-seed: ${taskId}
+
+# Only enforce in fusion-managed task worktrees.
+TASK_FILE=$(git rev-parse --git-path fusion-task-id)
+[ -f "$TASK_FILE" ] || exit 0
+
+COMMIT_SOURCE="\${2:-}"
+
+# Allow legitimate paths that may produce empty commits:
+#   - commit  (amend via --amend with no -m)
+#   - merge   (merge commit)
+#   - squash  (squash merge)
+#   - cherry-pick / revert / rebase ceremonies (detected via git-dir markers)
+case "$COMMIT_SOURCE" in
+  commit|merge|squash) exit 0 ;;
+esac
+
+# 'git commit --amend -m "..."' reports source=message (not commit), so the
+# source arg alone cannot distinguish amend-with-new-message from
+# --allow-empty -m. Inspect the parent process command line as a tiebreaker.
+PARENT_CMD=$(ps -o args= -p "$PPID" 2>/dev/null || echo "")
+case "$PARENT_CMD" in
+  *' --amend'*|*' --amend '*) exit 0 ;;
+esac
+
+GIT_DIR=$(git rev-parse --git-dir)
+if [ -f "$GIT_DIR/MERGE_HEAD" ] \\
+  || [ -f "$GIT_DIR/CHERRY_PICK_HEAD" ] \\
+  || [ -f "$GIT_DIR/REVERT_HEAD" ] \\
+  || [ -d "$GIT_DIR/rebase-merge" ] \\
+  || [ -d "$GIT_DIR/rebase-apply" ]; then
+  exit 0
+fi
+
+if git diff --cached --quiet --no-ext-diff 2>/dev/null; then
+  printf '%s\\n' "fusion: refusing empty commit \u2014 staged diff is empty." >&2
+  printf '%s\\n' "  Use fn_task_document_write for narrative output, not git commits." >&2
+  printf '%s\\n' "  (FN-5345/FN-5377 empty-commit guard)" >&2
+  exit 1
+fi
+`;
 }
 
 export function buildCommitMsgTrailerHook(
@@ -141,6 +208,23 @@ async function installCommitMsgHook(input: {
   await writeFileAtomic(hookPath, hook, 0o755);
 }
 
+async function installPrepareCommitMsgEmptyGuard(input: {
+  worktreePath: string;
+  taskId: string;
+}): Promise<void> {
+  const hookPath = await resolveGitPath(input.worktreePath, "hooks/prepare-commit-msg");
+  const existing = await fs.readFile(hookPath, "utf-8").catch(() => null);
+  if (existing && !existing.includes(PREPARE_COMMIT_MSG_HOOK_MARKER)) {
+    console.warn(
+      `[worktree-hooks] prepare-commit-msg hook already exists at ${hookPath}; skipping Fusion empty-commit guard install for ${input.taskId}`
+    );
+    return;
+  }
+
+  const hook = buildPrepareCommitMsgEmptyGuardHook(input.taskId);
+  await writeFileAtomic(hookPath, hook, 0o755);
+}
+
 export async function installTaskWorktreeIdentityGuard(input: {
   worktreePath: string;
   taskId: string;
@@ -164,4 +248,11 @@ export async function installTaskWorktreeIdentityGuard(input: {
       trailerName: input.taskAttributionTrailerName ?? "Fusion-Task-Id",
     });
   }
+
+  // FN-5345/FN-5377: install the empty-commit guard alongside the trailer
+  // hook. Skipped automatically if a non-fusion hook already exists.
+  await installPrepareCommitMsgEmptyGuard({
+    worktreePath: input.worktreePath,
+    taskId: input.taskId,
+  });
 }
