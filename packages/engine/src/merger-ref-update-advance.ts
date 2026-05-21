@@ -62,7 +62,6 @@ export async function advanceIntegrationBranchRef(args: {
 > {
   const {
     rootDir,
-    projectRootDir,
     integrationBranch,
     newSha,
     expectedCurrentSha,
@@ -81,23 +80,39 @@ export async function advanceIntegrationBranchRef(args: {
   }
 
   const ref = `refs/heads/${integrationBranch}`;
+  const emitRefAdvance = async (input: {
+    succeeded: boolean;
+    error?: string;
+    fromSha: string | null;
+    toSha: string;
+  }): Promise<void> => {
+    await audit.git({
+      type: "merge:integration-ref-advance",
+      target: integrationBranch,
+      metadata: {
+        taskId,
+        integrationBranch,
+        refName: ref,
+        fromSha: input.fromSha,
+        toSha: input.toSha,
+        advanceMode: "update-ref",
+        succeeded: input.succeeded,
+        ...(input.error ? { error: input.error } : {}),
+      },
+    });
+  };
+
   let observedCurrentSha = "";
   try {
     const { stdout } = await testHooks.runGit(["rev-parse", "--verify", ref], rootDir);
     observedCurrentSha = stdout.trim();
   } catch (error: unknown) {
     const diagnostic = error instanceof Error ? error.message : String(error);
-    await audit.git({
-      type: "merge:reuse-integration-branch-advance-failed",
-      target: integrationBranch,
-      metadata: {
-        taskId,
-        newSha,
-        expectedCurrentSha,
-        reason: "missing-current-sha",
-        diagnostic,
-        projectRootDir,
-      },
+    await emitRefAdvance({
+      succeeded: false,
+      fromSha: expectedCurrentSha || null,
+      toSha: newSha,
+      error: `missing-current-sha: ${diagnostic}`,
     });
     return {
       advanced: false,
@@ -108,17 +123,11 @@ export async function advanceIntegrationBranchRef(args: {
 
   if (!observedCurrentSha) {
     const diagnostic = `Missing current sha for ${ref}`;
-    await audit.git({
-      type: "merge:reuse-integration-branch-advance-failed",
-      target: integrationBranch,
-      metadata: {
-        taskId,
-        newSha,
-        expectedCurrentSha,
-        reason: "missing-current-sha",
-        diagnostic,
-        projectRootDir,
-      },
+    await emitRefAdvance({
+      succeeded: false,
+      fromSha: expectedCurrentSha || null,
+      toSha: newSha,
+      error: `missing-current-sha: ${diagnostic}`,
     });
     return {
       advanced: false,
@@ -129,18 +138,11 @@ export async function advanceIntegrationBranchRef(args: {
 
   if (observedCurrentSha !== expectedCurrentSha) {
     const diagnostic = `Expected ${expectedCurrentSha} but observed ${observedCurrentSha} for ${ref}`;
-    await audit.git({
-      type: "merge:reuse-integration-branch-advance-failed",
-      target: integrationBranch,
-      metadata: {
-        taskId,
-        newSha,
-        expectedCurrentSha,
-        observedCurrentSha,
-        reason: "concurrent-advance",
-        diagnostic,
-        projectRootDir,
-      },
+    await emitRefAdvance({
+      succeeded: false,
+      fromSha: expectedCurrentSha,
+      toSha: newSha,
+      error: `concurrent-advance: ${diagnostic}`,
     });
     return {
       advanced: false,
@@ -152,10 +154,10 @@ export async function advanceIntegrationBranchRef(args: {
 
   try {
     await testHooks.runGit(["update-ref", ref, newSha, expectedCurrentSha], rootDir);
-    await audit.git({
-      type: "merge:reuse-integration-branch-advanced",
-      target: integrationBranch,
-      metadata: { taskId, sha: newSha, via: "update-ref", expectedCurrentSha, projectRootDir },
+    await emitRefAdvance({
+      succeeded: true,
+      fromSha: expectedCurrentSha,
+      toSha: newSha,
     });
     return { advanced: true, previousSha: expectedCurrentSha, newSha };
   } catch (error: unknown) {
@@ -163,18 +165,11 @@ export async function advanceIntegrationBranchRef(args: {
     const lower = diagnostic.toLowerCase();
     const isConcurrent = lower.includes("cannot lock ref") || lower.includes("is at") || lower.includes("expected");
     const reason = isConcurrent ? "concurrent-advance" : "ref-update-refused";
-    await audit.git({
-      type: "merge:reuse-integration-branch-advance-failed",
-      target: integrationBranch,
-      metadata: {
-        taskId,
-        newSha,
-        expectedCurrentSha,
-        observedCurrentSha,
-        reason,
-        diagnostic,
-        projectRootDir,
-      },
+    await emitRefAdvance({
+      succeeded: false,
+      fromSha: observedCurrentSha || expectedCurrentSha,
+      toSha: newSha,
+      error: `${reason}: ${diagnostic}`,
     });
     return {
       advanced: false,

@@ -313,6 +313,8 @@ Hard-won rules (FN-2370 silently reverted three commits' worth of work):
 10. **Auto-prerebase on hot-file/threshold divergence (FN-4958).** Before Stage 1 remote rebase, merger may prerebase the task branch onto local main when hot-file overlap or divergence threshold triggers (`packages/engine/src/merger-auto-prerebase.ts`). Failures are fail-soft (`merge:auto-prerebase:failed`) and fall through to the existing Stage 1/2/Layer 1–3 cascade; worktrunk-enabled paths defer this layer.
 11. **Integration branch advance is ref-only (FN-5350).** After the task worktree squash succeeds, the merger advances `refs/heads/<integration-branch>` via `git update-ref refs/heads/<integration> <new-sha> <expected-current-sha>` against the task-worktree git root, never via `git checkout <integration> && git merge --ff-only`. Compare-and-swap (`expected-current-sha`) preserves the concurrent-advance rule: if integration moved between detach and advance, `update-ref` refuses, the merger throws `IntegrationBranchConcurrentAdvanceError`, the task parks in `in-review` (`status: "failed"`), and upstream re-rebase machinery (FN-4500 / FN-5083 / standard re-execution) recovers on the next pass. Dirty + untracked files in the user's checked-out integration-branch worktree at `projectRootDir` are never touched and never block a merge. On successful advance, the merger logs `<integration> advanced to <sha> via update-ref; your checked-out worktree at <projectRootDir> is now behind` — informational, not an error.
 
+Audit verification surface for FN-5348/FN-5349/FN-5350 invariants: `merge:integration-worktree-state` (captures integration checkout/dirty state and selected integration mode before handoff), `merge:cwd-integration-fallback-refused` (records terminal park when reuse handoff refusal cannot be recovered), and `merge:integration-ref-advance` (records every integration ref advance attempt outcome with resolved branch/ref metadata).
+
 ### Gitignored-path guard on squash merges
 
 The merger strips gitignored paths from staged squash sets before commit (standard, Attempt 3 fallback, and verification-fix rebuild). Any staged ignored path is unstaged and logged.
@@ -431,6 +433,9 @@ Reusable quality gates at configurable lifecycle phases. **Pre-merge** can block
 Every engine mutation is recorded across four domains:
 - **Database** — task:create, task:update, task:move, `room:ambiguity:branch` (deictic message routing telemetry), etc.
 - **Git** — worktree:create, commit:create, merge:resolve, etc.
+  - `merge:cwd-integration-fallback-refused` — terminal reuse-handoff refusal path that parks in-review without cwd fallback.
+  - `merge:integration-ref-advance` — typed integration ref update outcome (`succeeded`/`error`) with resolved ref metadata.
+  - `merge:integration-worktree-state` — per-merge snapshot of resolved integration branch checkout and dirty/untracked state.
 - **Filesystem** — file:write, prompt:write, attachment:create, `secret:read|create|update|delete|approval-requested|approval-granted|approval-denied|sync-push|sync-pull`, `secret:env-*`, etc.
 - **Sandbox** — `sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`.
 

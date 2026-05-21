@@ -166,8 +166,58 @@ export type GitMutationType =
   | "merge:reuse-fallback-reused-existing-registration"
   | "merge:reuse-worktree-fresh-acquire"
   | "merge:reuse-worktree-fresh-acquired"
-  | "merge:reuse-integration-branch-advanced"
-  | "merge:reuse-integration-branch-advance-failed"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId: string;
+   *   integrationBranch: string;
+   *   integrationMode: "reuse-task-worktree" | "cwd-integration";
+   *   integrationRootDir: string;
+   *   taskWorktreePath: string | null;
+   *   userCheckout: {
+   *     worktreePath: string;
+   *     dirty: boolean;
+   *     untrackedCount: number;
+   *     dirtyPathSample: string[];
+   *   } | null;
+   *   dirtyFingerprint: string | null;
+   * }
+   * ```
+   */
+  | "merge:integration-worktree-state"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId: string;
+   *   integrationBranch: string;
+   *   refusedGate: string;
+   *   refusedReason: string;
+   *   requestedMode: "reuse-task-worktree" | "cwd-integration";
+   *   taskWorktreePath: string | null;
+   *   parkOutcome: "in-review-failed";
+   * }
+   * ```
+   */
+  | "merge:cwd-integration-fallback-refused"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId: string;
+   *   integrationBranch: string;
+   *   refName: string;
+   *   fromSha: string | null;
+   *   toSha: string;
+   *   advanceMode: "fast-forward" | "non-fast-forward" | "update-ref";
+   *   aiResolved?: boolean;
+   *   succeeded: boolean;
+   *   error?: string;
+   * }
+   * ```
+   */
+  | "merge:integration-ref-advance"
   | "merge:audit-failure"
   | "branch:auto-reclaim"
   | "branch:auto-canonicalize-case"

@@ -29,4 +29,62 @@ describe("run-audit provisioning mutation types", () => {
 
     expect(store.events.map((event) => event.mutationType)).toEqual(types);
   });
+
+  it("accepts integration-worktree merge git mutation types", async () => {
+    const store = new AuditStoreStub();
+    const auditor = createRunAuditor(store as unknown as TaskStore, { runId: "r1", agentId: "a1", taskId: "FN-1" });
+
+    await auditor.git({
+      type: "merge:integration-worktree-state",
+      target: "main",
+      metadata: {
+        taskId: "FN-1",
+        integrationBranch: "main",
+        integrationMode: "reuse-task-worktree",
+        integrationRootDir: "/repo",
+        taskWorktreePath: "/repo/.worktrees/fn-1",
+        userCheckout: {
+          worktreePath: "/repo",
+          dirty: true,
+          untrackedCount: 1,
+          dirtyPathSample: ["README.md"],
+        },
+        dirtyFingerprint: "abc123",
+      },
+    });
+    await auditor.git({
+      type: "merge:cwd-integration-fallback-refused",
+      target: "main",
+      metadata: {
+        taskId: "FN-1",
+        integrationBranch: "main",
+        refusedGate: "working-tree-dirty",
+        refusedReason: "worktree has local changes",
+        requestedMode: "reuse-task-worktree",
+        taskWorktreePath: "/repo/.worktrees/fn-1",
+        parkOutcome: "in-review-failed",
+      },
+    });
+    await auditor.git({
+      type: "merge:integration-ref-advance",
+      target: "main",
+      metadata: {
+        taskId: "FN-1",
+        integrationBranch: "main",
+        refName: "refs/heads/main",
+        fromSha: "1111111",
+        toSha: "2222222",
+        advanceMode: "fast-forward",
+        succeeded: true,
+      },
+    });
+
+    expect(store.events).toHaveLength(3);
+    expect(store.events.map((event) => event.domain)).toEqual(["git", "git", "git"]);
+    expect(store.events.map((event) => event.mutationType)).toEqual([
+      "merge:integration-worktree-state",
+      "merge:cwd-integration-fallback-refused",
+      "merge:integration-ref-advance",
+    ]);
+  });
 });

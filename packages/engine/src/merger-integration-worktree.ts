@@ -151,7 +151,7 @@ export interface ReuseHandoffInput {
   auditEmit?: (event: { type: string; target?: string; metadata?: Record<string, unknown> }) => Promise<void> | void;
 }
 
-async function snapshotDirtyFilesLocal(rootDir: string): Promise<Set<string>> {
+export async function snapshotDirtyFilesLocal(rootDir: string): Promise<Set<string>> {
   const paths = new Set<string>();
   try {
     const [unstagedOut, stagedOut, porcelainOut] = await Promise.all([
@@ -188,7 +188,7 @@ async function snapshotDirtyFilesLocal(rootDir: string): Promise<Set<string>> {
   return paths;
 }
 
-async function gitDirtyFingerprintLocal(rootDir: string): Promise<string> {
+export async function gitDirtyFingerprintLocal(rootDir: string): Promise<string> {
   try {
     const [diffOut, statusOut] = await Promise.all([
       execFileAsync("git", ["diff", "HEAD"], {
@@ -205,6 +205,65 @@ async function gitDirtyFingerprintLocal(rootDir: string): Promise<string> {
     return createHash("sha256").update(diffOut).update("\0").update(statusOut).digest("hex");
   } catch {
     return "";
+  }
+}
+
+export interface IntegrationWorktreeProbeResult {
+  userCheckout: {
+    worktreePath: string;
+    dirty: boolean;
+    untrackedCount: number;
+    dirtyPathSample: string[];
+  } | null;
+  dirtyFingerprint: string | null;
+}
+
+export interface ProbeIntegrationWorktreeStateInput {
+  rootDir: string;
+  integrationBranch: string;
+  projectRoot: string;
+}
+
+export async function probeIntegrationWorktreeState(
+  input: ProbeIntegrationWorktreeStateInput,
+): Promise<IntegrationWorktreeProbeResult> {
+  try {
+    const branchMap = await getRegisteredWorktreeBranchMap(input.projectRoot);
+    const caseInsensitiveMatches = Array.from(branchMap.entries())
+      .filter(([branch]) => branch.toLowerCase() === input.integrationBranch.toLowerCase())
+      .map(([, worktreePath]) => worktreePath);
+    const registeredPath = branchMap.get(input.integrationBranch)
+      ?? caseInsensitiveMatches.find((worktreePath) => canonicalizePath(worktreePath) === canonicalizePath(input.rootDir))
+      ?? caseInsensitiveMatches[0]
+      ?? null;
+    if (!registeredPath) {
+      return { userCheckout: null, dirtyFingerprint: null };
+    }
+
+    const dirtyPaths = Array.from(await snapshotDirtyFilesLocal(registeredPath)).sort();
+    const dirtyFingerprint = await gitDirtyFingerprintLocal(registeredPath);
+    let untrackedCount = 0;
+    try {
+      const { stdout } = await execFileAsync("git", ["status", "-z", "--porcelain"], {
+        cwd: registeredPath,
+        encoding: "utf-8",
+      });
+      untrackedCount = stdout.split("\0").filter((entry) => entry.startsWith("?? ")).length;
+    } catch {
+      // best-effort
+    }
+
+    return {
+      userCheckout: {
+        worktreePath: registeredPath,
+        dirty: dirtyPaths.length > 0 || Boolean(dirtyFingerprint),
+        untrackedCount,
+        dirtyPathSample: dirtyPaths.slice(0, 20),
+      },
+      dirtyFingerprint: dirtyFingerprint || null,
+    };
+  } catch {
+    return { userCheckout: null, dirtyFingerprint: null };
   }
 }
 

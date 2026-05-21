@@ -102,6 +102,7 @@ import { decideAutoPrerebase, probeDivergence, runAutoPrerebase } from "./merger
 import {
   acquireReuseHandoff,
   MergeHandoffRefusedError,
+  probeIntegrationWorktreeState,
   releaseReuseHandoff,
   resolveIntegrationRemote,
   resolveMergeIntegrationRoot,
@@ -6671,6 +6672,7 @@ export async function aiMergeTask(
   const mergeTarget = resolveTaskMergeTarget(task, {
     projectDefaultBranch: resolvedIntegrationBranch,
   });
+  const integrationBranch = resolvedIntegrationBranch;
   let branch = task.branch || canonicalFusionBranchName(taskId);
 
   const mergeRunId = generateSyntheticRunId("merge", taskId);
@@ -7004,6 +7006,31 @@ export async function aiMergeTask(
       }
     }
   }
+  try {
+    const integrationWorktreeState = await probeIntegrationWorktreeState({
+      rootDir: integrationRoot.rootDir,
+      integrationBranch,
+      projectRoot: projectRootDir,
+    });
+    await audit.git({
+      type: "merge:integration-worktree-state",
+      target: projectRootDir,
+      metadata: {
+        taskId,
+        integrationBranch,
+        integrationMode: integrationRoot.mode === "reuse-task-worktree" ? "reuse-task-worktree" : "cwd-integration",
+        integrationRootDir: integrationRoot.rootDir,
+        taskWorktreePath: task.worktree?.trim() || null,
+        userCheckout: integrationWorktreeState.userCheckout,
+        dirtyFingerprint: integrationWorktreeState.dirtyFingerprint,
+      },
+    });
+  } catch (auditErr: unknown) {
+    mergerLog.warn(
+      `${taskId}: failed to emit merge:integration-worktree-state: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+    );
+  }
+
   if (integrationRoot.mode === "reuse-task-worktree") {
     try {
       reuseHandoff = await acquireReuseHandoff({
@@ -7061,6 +7088,25 @@ export async function aiMergeTask(
             classification,
           });
         } else {
+          try {
+            await audit.git({
+              type: "merge:cwd-integration-fallback-refused",
+              target: integrationRoot.rootDir,
+              metadata: {
+                taskId,
+                integrationBranch,
+                refusedGate: error.gate,
+                refusedReason: error.reason,
+                requestedMode: requestedIntegrationMode === "reuse-task-worktree" ? "reuse-task-worktree" : "cwd-integration",
+                taskWorktreePath: task.worktree?.trim() || null,
+                parkOutcome: "in-review-failed",
+              },
+            });
+          } catch (auditErr: unknown) {
+            mergerLog.warn(
+              `${taskId}: failed to emit merge:cwd-integration-fallback-refused: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+            );
+          }
           throw error;
         }
       }

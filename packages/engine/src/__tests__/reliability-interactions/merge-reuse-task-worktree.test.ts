@@ -74,11 +74,11 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
 
       // Step 5c (FN-5279 reuse mode) advances the project root's integration
       // branch to the new squash commit so changes actually land on master.
-      expect(auditTypes).toContain("merge:reuse-integration-branch-advanced");
+      expect(auditTypes).toContain("merge:integration-ref-advance");
       const advanced = audits.find(
-        (event) => event.mutationType === "merge:reuse-integration-branch-advanced",
+        (event) => event.mutationType === "merge:integration-ref-advance",
       );
-      expect(advanced?.metadata).toMatchObject({ via: "update-ref" });
+      expect(advanced?.metadata).toMatchObject({ advanceMode: "update-ref", succeeded: true });
       expect(git(rootDir, "git rev-parse HEAD")).not.toBe(rootHeadBefore);
       const rootTrackedStatusAfter = git(rootDir, "git status --porcelain --untracked-files=no");
       expect(rootTrackedStatusAfter).not.toBe(rootTrackedStatusBefore);

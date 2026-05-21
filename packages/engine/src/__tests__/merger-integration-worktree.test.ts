@@ -12,6 +12,7 @@ import * as branchAutocorrect from "../branch-autocorrect.js";
 import {
   acquireReuseHandoff,
   MergeHandoffRefusedError,
+  probeIntegrationWorktreeState,
   releaseReuseHandoff,
   resolveIntegrationRemote,
   resolveMergeIntegrationRoot,
@@ -121,6 +122,103 @@ describe("resolveIntegrationRemote", () => {
         integrationBranch: "master",
       }),
     ).resolves.toBe("fork");
+  });
+});
+
+describe("probeIntegrationWorktreeState", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns null state when integration branch is not checked out in any linked worktree", async () => {
+    vi.spyOn(worktreePool, "getRegisteredWorktreeBranchMap").mockResolvedValue(new Map([["fusion/fn-1", "/tmp/task"]]));
+
+    await expect(
+      probeIntegrationWorktreeState({
+        rootDir: "/tmp/project-root",
+        integrationBranch: "main",
+        projectRoot: "/tmp/project-root",
+      }),
+    ).resolves.toEqual({ userCheckout: null, dirtyFingerprint: null });
+  });
+
+  it("returns clean user checkout state", async () => {
+    vi.spyOn(worktreePool, "getRegisteredWorktreeBranchMap").mockResolvedValue(new Map([["main", "/tmp/project-root"]]));
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git diff -z --name-only") return Buffer.from("");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const state = await probeIntegrationWorktreeState({
+      rootDir: "/tmp/project-root",
+      integrationBranch: "main",
+      projectRoot: "/tmp/project-root",
+    });
+
+    expect(state).toEqual({
+      userCheckout: {
+        worktreePath: "/tmp/project-root",
+        dirty: false,
+        untrackedCount: 0,
+        dirtyPathSample: [],
+      },
+      dirtyFingerprint: null,
+    });
+  });
+
+  it("returns dirty user checkout state with staged, unstaged, and untracked files", async () => {
+    vi.spyOn(worktreePool, "getRegisteredWorktreeBranchMap").mockResolvedValue(new Map([["main", "/tmp/project-root"]]));
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git diff -z --name-only") return Buffer.from("unstaged.ts\0");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("staged.ts\0");
+      if (command === "git status -z --porcelain") return Buffer.from("M modified.ts\0?? untracked.txt\0");
+      if (command === "git diff HEAD") return Buffer.from("diff --git a/a b/a\n");
+      return Buffer.from("");
+    });
+
+    const state = await probeIntegrationWorktreeState({
+      rootDir: "/tmp/project-root",
+      integrationBranch: "main",
+      projectRoot: "/tmp/project-root",
+    });
+
+    expect(state.userCheckout).toMatchObject({
+      worktreePath: "/tmp/project-root",
+      dirty: true,
+      untrackedCount: 1,
+    });
+    expect(state.userCheckout?.dirtyPathSample).toEqual([
+      "staged.ts",
+      "unstaged.ts",
+      "untracked.txt",
+    ]);
+    expect(state.dirtyFingerprint).toEqual(expect.any(String));
+  });
+
+  it("supports master as integration branch", async () => {
+    vi.spyOn(worktreePool, "getRegisteredWorktreeBranchMap").mockResolvedValue(new Map([["master", "/tmp/project-root"]]));
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command === "git diff -z --name-only") return Buffer.from("");
+      if (command === "git diff -z --cached --name-only") return Buffer.from("");
+      if (command === "git status -z --porcelain") return Buffer.from("");
+      if (command === "git diff HEAD") return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    const state = await probeIntegrationWorktreeState({
+      rootDir: "/tmp/project-root",
+      integrationBranch: "master",
+      projectRoot: "/tmp/project-root",
+    });
+
+    expect(state.userCheckout?.worktreePath).toBe("/tmp/project-root");
+    expect(state.userCheckout?.dirty).toBe(false);
   });
 });
 

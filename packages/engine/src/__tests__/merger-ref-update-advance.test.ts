@@ -46,8 +46,10 @@ describe("advanceIntegrationBranchRef", () => {
 
       expect(result).toEqual({ advanced: true, previousSha: expectedCurrentSha, newSha });
       expect(git(dir, `git rev-parse refs/heads/${integrationBranch}`)).toBe(newSha);
-      expect(events[0]?.type).toBe("merge:reuse-integration-branch-advanced");
-      expect(events[0]?.metadata?.via).toBe("update-ref");
+      expect(events[0]?.type).toBe("merge:integration-ref-advance");
+      expect(events[0]?.metadata?.advanceMode).toBe("update-ref");
+      expect(events[0]?.metadata?.succeeded).toBe(true);
+      expect(events[0]?.metadata?.refName).toBe(`refs/heads/${integrationBranch}`);
       expect(events[0]?.target).toBe(integrationBranch);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -89,7 +91,8 @@ describe("advanceIntegrationBranchRef", () => {
       expect(result.reason).toBe("concurrent-advance");
       expect(result.observedCurrentSha).toBe(observedCurrentSha);
       expect(git(dir, "git rev-parse refs/heads/main")).toBe(observedCurrentSha);
-      expect(events[0]?.type).toBe("merge:reuse-integration-branch-advance-failed");
+      expect(events[0]?.type).toBe("merge:integration-ref-advance");
+      expect(events[0]?.metadata?.succeeded).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

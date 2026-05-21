@@ -59,8 +59,9 @@ describe.skipIf(!hasGit)("reliability interaction: dirty integration worktree wi
         return ["checkout", "merge", "rebase", "update-ref"].includes(args[0] ?? "");
       })).toBe(false);
 
-      const advanceEvent = events.find((event) => event.type === "merge:reuse-integration-branch-advanced");
-      expect(advanceEvent?.metadata?.via).toBe("update-ref");
+      const advanceEvent = events.find((event) => event.type === "merge:integration-ref-advance");
+      expect(advanceEvent?.metadata?.advanceMode).toBe("update-ref");
+      expect(advanceEvent?.metadata?.succeeded).toBe(true);
       expect(advanceEvent?.target).toBe(integrationBranch);
       if (integrationBranch === "master") {
         expect(JSON.stringify(advanceEvent)).not.toContain('"main"');
@@ -114,10 +115,9 @@ describe.skipIf(!hasGit)("reliability interaction: dirty integration worktree wi
       if (result.advanced) throw new Error("expected refusal");
       expect(result.reason).toBe("concurrent-advance");
       expect(git(projectRootDir, "git rev-parse refs/heads/main")).toBe(observedCurrentSha);
-      const failureEvent = events.find((event) => event.type === "merge:reuse-integration-branch-advance-failed");
-      expect(failureEvent?.metadata?.reason).toBe("concurrent-advance");
-      expect(failureEvent?.metadata?.expectedCurrentSha).toBe(expectedCurrentSha);
-      expect(failureEvent?.metadata?.observedCurrentSha).toBe(observedCurrentSha);
+      const failureEvent = events.find((event) => event.type === "merge:integration-ref-advance");
+      expect(failureEvent?.metadata?.succeeded).toBe(false);
+      expect(String(failureEvent?.metadata?.error ?? "")).toContain("concurrent-advance");
     } finally {
       rmSync(projectRootDir, { recursive: true, force: true });
     }

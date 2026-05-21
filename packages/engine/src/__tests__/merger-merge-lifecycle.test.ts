@@ -227,6 +227,7 @@ function createMockStore(taskOverrides: Partial<Task> = {}, allTasks: Task[] = [
     clearStaleExecutionStartBranchReferences: vi.fn().mockReturnValue([]),
     getVerificationCacheHit: vi.fn().mockReturnValue(null),
     recordVerificationCachePass: vi.fn(),
+    recordRunAuditEvent: vi.fn(),
   } as unknown as TaskStore;
 }
 
@@ -433,6 +434,29 @@ describe("aiMergeTask pre-merge fetch + fast-forward (smart strategies)", () => 
 
     expect(probe.fetchCalled).toBe(true);
     expect(probe.ffCalled).toBe(true);
+  });
+
+  it("emits integration-worktree-state once per merge attempt", async () => {
+    const store = createMockStore(
+      { id: "FN-050", worktree: "/tmp/root" },
+      [{ id: "FN-050", worktree: "/tmp/root", column: "in-review" } as Task],
+    );
+    setupSyncMock({ behind: 0, ahead: 0 });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    const events = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls
+      .map(([event]) => event)
+      .filter((event: any) => event?.mutationType === "merge:integration-worktree-state");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      domain: "git",
+      mutationType: "merge:integration-worktree-state",
+      metadata: expect.objectContaining({
+        integrationBranch: "main",
+        integrationMode: "cwd-integration",
+      }),
+    });
   });
 });
 
