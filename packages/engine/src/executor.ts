@@ -209,6 +209,77 @@ type TaskDoneRefusalResult =
     reason: string;
   };
 
+type PendingReviewBlockResult =
+  | {
+    blocked: true;
+    reason:
+      | "code-review-revise-outstanding"
+      | "review-request-without-verdict"
+      | "code-review-rethink-or-unavailable-outstanding"
+      | "code-review-unavailable-blocking";
+    stepIndex: number;
+  }
+  | { blocked: false };
+
+function detectPendingReviewBlock(
+  task: Task,
+  codeReviewVerdicts: Map<number, ReviewVerdict>,
+): PendingReviewBlockResult {
+  const inProgressStepIndices: number[] = [];
+  for (let stepIndex = 0; stepIndex < task.steps.length; stepIndex++) {
+    if (task.steps[stepIndex]?.status === "in-progress") {
+      inProgressStepIndices.push(stepIndex);
+    }
+  }
+
+  if (inProgressStepIndices.length === 0) {
+    return { blocked: false };
+  }
+
+  const recentActions = (task.log ?? [])
+    .slice(-30)
+    .map((entry) => entry.action?.trim())
+    .filter((action): action is string => Boolean(action));
+
+  for (const stepIndex of inProgressStepIndices) {
+    if (codeReviewVerdicts.get(stepIndex) === "REVISE") {
+      return { blocked: true, reason: "code-review-revise-outstanding", stepIndex };
+    }
+
+    const stepDisplay = stepIndex + 1;
+    const codeRequest = `code review requested for Step ${stepDisplay}`;
+    const planRequest = `plan review requested for Step ${stepDisplay}`;
+    const codeVerdictPrefix = `code review Step ${stepDisplay}:`;
+    const planVerdictPrefix = `plan review Step ${stepDisplay}:`;
+
+    for (let i = recentActions.length - 1; i >= 0; i--) {
+      const action = recentActions[i];
+      if (!action) {
+        continue;
+      }
+
+      if (action.startsWith(codeRequest) || action.startsWith(planRequest)) {
+        return { blocked: true, reason: "review-request-without-verdict", stepIndex };
+      }
+
+      if (action.startsWith(`${codeVerdictPrefix} RETHINK`)) {
+        return { blocked: true, reason: "code-review-rethink-or-unavailable-outstanding", stepIndex };
+      }
+
+      if (action.startsWith(`${codeVerdictPrefix} UNAVAILABLE`)
+        && action.includes("blocking until reviewer returns a usable verdict")) {
+        return { blocked: true, reason: "code-review-unavailable-blocking", stepIndex };
+      }
+
+      if (action.startsWith(codeVerdictPrefix) || action.startsWith(planVerdictPrefix)) {
+        break;
+      }
+    }
+  }
+
+  return { blocked: false };
+}
+
 function formatTaskDoneRefusal(refusalClass: TaskDoneRefusalClass, reason: string): string {
   return `fn_task_done refused (${refusalClass}): ${reason}. ${TASK_DONE_REFUSAL_SUFFIX}`;
 }
@@ -4157,6 +4228,7 @@ export class TaskExecutor {
             let taskDoneSessionRetries = 0;
             let retryAbortedDueToReclaim = false;
             let refusalHandled = false;
+            let pendingReviewParked = false;
             while (!taskDone && taskDoneSessionRetries < MAX_TASK_DONE_SESSION_RETRIES) {
               const liveTask = await this.store.getTask(task.id);
               const hasExplicitWorktreeBinding = typeof liveTask.worktree === "string" || liveTask.worktree === null;
@@ -4173,6 +4245,31 @@ export class TaskExecutor {
                 this.tokenUsageBaselines.delete(task.id);
                 session.dispose();
                 retryAbortedDueToReclaim = true;
+                break;
+              }
+
+              const pendingReviewBlock = detectPendingReviewBlock(liveTask, codeReviewVerdicts);
+              if (pendingReviewBlock.blocked) {
+                executorLog.log(
+                  `[executor] ${task.id}: fn_task_done not called but task is blocked on pending review (${pendingReviewBlock.reason}) — skipping retry session`,
+                );
+                await this.store.logEntry(
+                  task.id,
+                  `Agent finished without calling fn_task_done but Step ${pendingReviewBlock.stepIndex + 1} is blocked on pending review (${pendingReviewBlock.reason}) — skipping retry session`,
+                  undefined,
+                  this.getRunContextFor(task.id),
+                );
+                this.deleteActiveSession(task.id);
+                this.tokenUsageBaselines.delete(task.id);
+                session.dispose();
+                await this.persistTokenUsage(task.id);
+                await this.store.updateTask(task.id, {
+                  status: "failed",
+                  error: "executor-exit-while-review-pending",
+                });
+                await this.handoffTaskToReview(task, "executor-exit-while-review-pending");
+                this.options.onError?.(task, new Error("executor-exit-while-review-pending"));
+                pendingReviewParked = true;
                 break;
               }
 
@@ -4404,6 +4501,8 @@ export class TaskExecutor {
               await this.store.moveTask(task.id, "todo", { preserveProgress: true });
               executorLog.log(silentMessage);
             } else if (refusalHandled) {
+              return;
+            } else if (pendingReviewParked) {
               return;
             } else {
               // FN-4806: Genuine "agent finished without calling fn_task_done after N retries"
