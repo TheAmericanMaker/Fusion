@@ -5,6 +5,7 @@ import {
   TaskStore,
   COLUMNS,
   COLUMN_LABELS,
+  buildManualRetryResetPatch,
   validateNodeOverrideChange,
   type Task,
   type InsightCategory,
@@ -999,7 +1000,11 @@ export default function kbExtension(pi: ExtensionAPI) {
           hasIncompleteSteps || (task.steps.length === 0 && (task.mergeRetries ?? 0) === 0);
 
         if (isExecutionFailureInReview) {
-          await store.updateTask(params.id, { status: null, error: null, stuckKillCount: 0 });
+          await store.updateTask(params.id, {
+            status: null,
+            error: null,
+            ...buildManualRetryResetPatch(),
+          });
           await store.logEntry(params.id, "Retry requested via Fusion extension (execution failure in-review → todo, preserving progress)");
           await store.moveTask(params.id, "todo", { preserveProgress: true });
           return {
@@ -1008,7 +1013,12 @@ export default function kbExtension(pi: ExtensionAPI) {
           };
         }
 
-        await store.updateTask(params.id, { status: null, error: null, stuckKillCount: 0, mergeRetries: 0 });
+        await store.updateTask(params.id, {
+          status: null,
+          error: null,
+          ...buildManualRetryResetPatch(),
+          mergeRetries: 0,
+        });
         await store.logEntry(params.id, "Retry requested via Fusion extension (in-review merge retry, mergeRetries reset)");
         return {
           content: [{ type: "text", text: `Retried ${params.id} → in-review (merge retry state cleared)` }],
@@ -1017,7 +1027,11 @@ export default function kbExtension(pi: ExtensionAPI) {
       }
 
       // Clear failure state and move to todo for other columns
-      await store.updateTask(params.id, { status: null, error: null });
+      await store.updateTask(params.id, {
+        status: null,
+        error: null,
+        ...buildManualRetryResetPatch(),
+      });
       
       // Move to todo column
       await store.moveTask(params.id, 'todo');

@@ -27,6 +27,7 @@ import {
   findDuplicateMatches,
   deterministicGuardLocks,
   runDeterministicDuplicateGuard,
+  buildManualRetryResetPatch,
   reconcileDeterministicDuplicate,
   extractIntentSignature,
   findNearDuplicates,
@@ -900,7 +901,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           await scopedStore.updateTask(req.params.id, {
             status: null,
             error: null,
-            stuckKillCount: 0,
+            ...buildManualRetryResetPatch(),
           });
           await scopedStore.logEntry(
             req.params.id,
@@ -914,7 +915,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         await scopedStore.updateTask(req.params.id, {
           status: null,
           error: null,
-          stuckKillCount: 0,
+          ...buildManualRetryResetPatch(),
           mergeRetries: 0,
         });
         await scopedStore.logEntry(req.params.id, "Retry requested from dashboard (in-review merge retry, mergeRetries reset)");
@@ -930,9 +931,9 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         branch: null,
         baseBranch: null,
         baseCommitSha: null,
-        stuckKillCount: 0,
         recoveryRetryCount: null,
         nextRecoveryAt: null,
+        ...buildManualRetryResetPatch(),
       });
 
       if (retrySpecification) {

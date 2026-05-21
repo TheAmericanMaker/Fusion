@@ -342,6 +342,8 @@ describe("POST /tasks/:id/retry", () => {
       baseBranch: null,
       baseCommitSha: null,
       stuckKillCount: 0,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
       recoveryRetryCount: null,
       nextRecoveryAt: null,
     });
@@ -380,6 +382,8 @@ describe("POST /tasks/:id/retry", () => {
       baseBranch: null,
       baseCommitSha: null,
       stuckKillCount: 0,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
       recoveryRetryCount: null,
       nextRecoveryAt: null,
     });
@@ -406,6 +410,8 @@ describe("POST /tasks/:id/retry", () => {
       baseBranch: null,
       baseCommitSha: null,
       stuckKillCount: 0,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
       recoveryRetryCount: null,
       nextRecoveryAt: null,
     });
@@ -435,6 +441,8 @@ describe("POST /tasks/:id/retry", () => {
       status: null,
       error: null,
       stuckKillCount: 0,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -466,6 +474,8 @@ describe("POST /tasks/:id/retry", () => {
       status: null,
       error: null,
       stuckKillCount: 0,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -529,6 +539,8 @@ describe("POST /tasks/:id/retry", () => {
       status: null,
       error: null,
       stuckKillCount: 0,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
     });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -562,6 +574,8 @@ describe("POST /tasks/:id/retry", () => {
       status: null,
       error: null,
       stuckKillCount: 0,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
       mergeRetries: 0,
     });
     expect(store.moveTask).not.toHaveBeenCalled();
@@ -593,6 +607,8 @@ describe("POST /tasks/:id/retry", () => {
       status: null,
       error: null,
       stuckKillCount: 0,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
       mergeRetries: 0,
     });
     expect(store.moveTask).not.toHaveBeenCalled();
@@ -673,6 +689,8 @@ describe("POST /tasks/:id/retry", () => {
         baseBranch: null,
         baseCommitSha: null,
         stuckKillCount: 0,
+        taskDoneRetryCount: 0,
+        workflowStepRetries: 0,
         recoveryRetryCount: null,
         nextRecoveryAt: null,
       });
@@ -1088,7 +1106,7 @@ describe("POST /tasks/:id/reset", () => {
       checkoutLeaseRenewedAt: null,
       checkoutLeaseEpoch: null,
       executionStartedAt: null,
-      taskDoneRetryCount: null,
+      taskDoneRetryCount: 0,
       worktreeSessionRetryCount: null,
       sessionFile: null,
     };

@@ -2415,6 +2415,9 @@ describe("runTaskRetry", () => {
       baseCommitSha: null,
       recoveryRetryCount: null,
       nextRecoveryAt: null,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
+      stuckKillCount: 0,
     });
     expect(mockMoveTask).toHaveBeenCalledWith("FN-001", "todo");
     expect(mockLogEntry).toHaveBeenCalledWith("FN-001", "Retry requested from CLI", "Task reset to todo for retry");
@@ -2475,6 +2478,9 @@ describe("runTaskRetry", () => {
       baseCommitSha: null,
       recoveryRetryCount: null,
       nextRecoveryAt: null,
+      taskDoneRetryCount: 0,
+      workflowStepRetries: 0,
+      stuckKillCount: 0,
     });
     expect(mockMoveTask).toHaveBeenCalledWith("FN-001", "todo");
     expect(mockLogEntry).toHaveBeenCalledWith("FN-001", "Retry requested from CLI", "Task reset to todo for retry");

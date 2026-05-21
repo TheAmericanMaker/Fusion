@@ -2349,7 +2349,13 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       });
       await store.moveTask(task.id, "in-progress");
       await store.moveTask(task.id, "in-review");
-      await store.updateTask(task.id, { status: "failed", error: "429 rate limited" });
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "429 rate limited",
+        taskDoneRetryCount: 2,
+        workflowStepRetries: 3,
+        stuckKillCount: 4,
+      });
 
       const retryTool = api.tools.get("fn_task_retry")!;
       const result = await retryTool.execute("retry-exec", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
@@ -2362,6 +2368,9 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(updated?.status).toBeFalsy();
       expect(updated?.error).toBeFalsy();
       expect(updated?.steps[1].status).toBe("in-progress");
+      expect(updated?.taskDoneRetryCount).toBe(0);
+      expect(updated?.workflowStepRetries).toBe(0);
+      expect(updated?.stuckKillCount).toBe(0);
     });
 
     it("moves zero-step execution-failed in-review task to todo and clears failure state", async () => {
@@ -2410,7 +2419,14 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       });
       await store.moveTask(task.id, "in-progress");
       await store.moveTask(task.id, "in-review");
-      await store.updateTask(task.id, { status: "failed", error: "merge conflict", mergeRetries: 3 });
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "merge conflict",
+        mergeRetries: 3,
+        taskDoneRetryCount: 5,
+        workflowStepRetries: 4,
+        stuckKillCount: 7,
+      });
 
       const retryTool = api.tools.get("fn_task_retry")!;
       const result = await retryTool.execute("retry-merge", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
@@ -2423,6 +2439,9 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(updated?.status).toBeFalsy();
       expect(updated?.error).toBeFalsy();
       expect(updated?.mergeRetries).toBe(0);
+      expect(updated?.taskDoneRetryCount).toBe(0);
+      expect(updated?.workflowStepRetries).toBe(0);
+      expect(updated?.stuckKillCount).toBe(0);
     });
 
     it("keeps zero-step merge-failed in-review task with prior merge attempts in-review and resets merge state", async () => {
