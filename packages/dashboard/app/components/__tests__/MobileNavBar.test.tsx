@@ -634,9 +634,9 @@ describe("MobileNavBar", () => {
     expect(container.querySelector(".mobile-nav-bar")).toBeNull();
   });
 
-  it("returns null when keyboardOpen is true on mobile", () => {
+  it("renders nav bar when keyboardOpen is true on mobile", () => {
     const { container } = render(<MobileNavBar {...createDefaultProps()} keyboardOpen={true} />);
-    expect(container.querySelector(".mobile-nav-bar")).toBeNull();
+    expect(container.querySelector(".mobile-nav-bar")).not.toBeNull();
   });
 
   it("renders nav bar when keyboardOpen is false on mobile", () => {
