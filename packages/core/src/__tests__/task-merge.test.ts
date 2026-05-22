@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { StepStatus } from "../types.js";
 import {
+  BLOCKING_TASK_STATUSES,
+  HARD_BLOCKING_TASK_STATUSES,
+  SCHEDULER_TRANSIENT_STATUSES,
   getTaskCompletionBlocker,
   getTaskHardMergeBlocker,
   getTaskMergeBlocker,
@@ -141,6 +144,53 @@ describe("getTaskMergeBlocker", () => {
   it("returns reason when task is queued (scheduler transient)", () => {
     expect(getTaskMergeBlocker({ ...baseTask, status: "queued" }))
       .toContain("queued");
+  });
+
+  it("bypasses queued status when merge is manual", () => {
+    expect(getTaskMergeBlocker({ ...baseTask, status: "queued" }, { manual: true }))
+      .toBeUndefined();
+  });
+
+  it("still blocks hard statuses for manual merge", () => {
+    for (const status of HARD_BLOCKING_TASK_STATUSES) {
+      expect(getTaskMergeBlocker({ ...baseTask, status }, { manual: true }))
+        .toContain(status);
+    }
+  });
+
+  it("manual merge preserves non-status hard guards", () => {
+    expect(getTaskMergeBlocker({ ...baseTask, paused: true }, { manual: true }))
+      .toBe("task is paused");
+    expect(getTaskMergeBlocker({ ...baseTask, column: "todo" }, { manual: true }))
+      .toContain("must be in 'in-review'");
+    expect(getTaskMergeBlocker({
+      ...baseTask,
+      steps: [{ name: "Step 1", status: "pending" }],
+    }, { manual: true })).toBe("task has incomplete steps");
+    expect(getTaskMergeBlocker({
+      ...baseTask,
+      workflowStepResults: [{
+        workflowStepId: "WS-001",
+        workflowStepName: "Pre-merge Check",
+        phase: "pre-merge",
+        status: "failed",
+      }],
+    }, { manual: true })).toBe("task has failed pre-merge workflow steps");
+  });
+
+  it("manual false preserves default blocking behavior", () => {
+    expect(getTaskMergeBlocker({ ...baseTask, status: "queued" }, { manual: false }))
+      .toContain("queued");
+  });
+
+  it("blocking status partitions remain backward compatible", () => {
+    expect(SCHEDULER_TRANSIENT_STATUSES.has("queued")).toBe(true);
+    for (const status of HARD_BLOCKING_TASK_STATUSES) {
+      expect(BLOCKING_TASK_STATUSES.has(status)).toBe(true);
+    }
+    for (const status of SCHEDULER_TRANSIENT_STATUSES) {
+      expect(BLOCKING_TASK_STATUSES.has(status)).toBe(true);
+    }
   });
 
   it("returns reason when task is stuck-killed", () => {

@@ -5232,6 +5232,12 @@ export async function findWorktreeUser(
 }
 
 export interface MergerOptions {
+  /**
+   * When true, skip scheduler-transient status blockers (`queued`).
+   * Hard guards (paused, column, incomplete steps, in-flight merge,
+   * failed pre-merge workflow steps) still apply. Set by `ProjectEngine.onMerge`.
+   */
+  manual?: boolean;
   /** Called with agent text output */
   onAgentText?: (delta: string) => void;
   /** Called with agent tool usage */
@@ -6720,7 +6726,7 @@ export async function aiMergeTask(
       branchDeleted: false,
     };
   }
-  const mergeBlocker = getTaskMergeBlocker(task);
+  const mergeBlocker = getTaskMergeBlocker(task, { manual: options.manual === true });
   if (mergeBlocker) {
     throw new Error(`Cannot merge ${taskId}: ${mergeBlocker}`);
   }

@@ -1531,6 +1531,7 @@ export class ProjectEngine {
               this.activeMergeTaskId = taskId;
               this.mergeAbortController = new AbortController();
               return aiMergeTask(store, cwd, taskId, {
+                manual: !!manualResolver,
                 pool,
                 usageLimitPauser,
                 agentStore,

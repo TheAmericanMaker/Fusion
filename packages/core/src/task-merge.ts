@@ -33,7 +33,7 @@ export function resolveTaskMergeTarget(
   return { branch: legacyFallback, source: "legacy-main" };
 }
 
-const BLOCKING_TASK_STATUSES = new Set([
+export const HARD_BLOCKING_TASK_STATUSES = new Set([
   "failed",
   // ── User-attention / awaiting-handoff states ─────────────────────────
   "awaiting-inspection",
@@ -51,12 +51,20 @@ const BLOCKING_TASK_STATUSES = new Set([
   "needs-replan",            // scheduler/executor/triage signaled re-plan
   // ── Mission-level validation in flight ───────────────────────────────
   "mission-validation",
-  // ── Scheduler-side transient state ───────────────────────────────────
-  "queued",                  // scheduler placed the task in line; not finalized
   // ── Abnormal termination — defensive guard ───────────────────────────
   // Task was killed by the stuck detector. If it surfaces in in-review,
   // it needs investigation, not auto-merge.
   "stuck-killed",
+]);
+
+export const SCHEDULER_TRANSIENT_STATUSES = new Set([
+  // scheduler placed the task in line; not finalized
+  "queued",
+]);
+
+export const BLOCKING_TASK_STATUSES = new Set([
+  ...HARD_BLOCKING_TASK_STATUSES,
+  ...SCHEDULER_TRANSIENT_STATUSES,
 ]);
 
 const NON_TERMINAL_STEP_STATUSES = new Set([
@@ -74,6 +82,7 @@ const NON_TERMINAL_WORKFLOW_STATUSES = new Set<WorkflowStepResult["status"]>([
  */
 export function getTaskMergeBlocker(
   task: Pick<Task, "column" | "paused" | "status" | "error" | "steps" | "workflowStepResults">,
+  options: { manual?: boolean } = {},
 ): string | undefined {
   if (task.column !== "in-review") {
     return `task is in '${task.column}', must be in 'in-review'`;
@@ -83,7 +92,8 @@ export function getTaskMergeBlocker(
     return "task is paused";
   }
 
-  if (task.status && BLOCKING_TASK_STATUSES.has(task.status)) {
+  const blockingStatuses = options.manual === true ? HARD_BLOCKING_TASK_STATUSES : BLOCKING_TASK_STATUSES;
+  if (task.status && blockingStatuses.has(task.status)) {
     return task.error
       ? `task is marked '${task.status}': ${task.error}`
       : `task is marked '${task.status}'`;

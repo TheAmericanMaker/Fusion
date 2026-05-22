@@ -997,7 +997,10 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     try {
       const { store: scopedStore, engine } = await getProjectContext(req);
       const merge = engine
-        ? (id: string) => engine.onMerge(id)
+        ? (id: string) => {
+          // Manual merge: bypasses scheduler-transient status blockers (FN-5438). Hard guards still apply.
+          return engine.onMerge(id);
+        }
         : options?.onMerge ?? ((id: string) => scopedStore.mergeTask(id));
       const result = await merge(req.params.id);
       res.json(result);
