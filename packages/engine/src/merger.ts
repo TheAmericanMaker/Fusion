@@ -40,6 +40,7 @@ import {
   filterFilesToOwnTaskCommits,
   SilentNoOpAttributionMismatchError,
 } from "./branch-attribution.js";
+import { isBranchAuthoritativeForTask } from "./branch-conflicts.js";
 import { hostname } from "node:os";
 import {
   buildTaskLineageTrailer,
@@ -3369,7 +3370,7 @@ type MergeFinalizeResult =
     mergeSha?: string;
     strategy?: AlreadyMergedDetectionStrategy;
   }
-  | { ok: false; reason: "fix-produced-no-content" | "unknown-phantom" };
+  | { ok: false; reason: "fix-produced-no-content" | "unknown-phantom" | "branch-ref-ahead-reset"; originalError?: string; branchAuthority?: "ok" | string };
 
 async function persistFinalizeResetLeftovers(rootDir: string, taskId: string, store?: TaskStore): Promise<void> {
   try {
@@ -3963,7 +3964,35 @@ export async function commitOrAmendMergeWithFixes(
     }
     const errorMessage = err instanceof Error ? err.message : String(err);
     mergerLog.warn(`${taskId}: failed to finalize merge commit: ${errorMessage}`);
-    return { ok: false, reason: "unknown-phantom" };
+    // FN-5422-class diagnostic: when finalize throws but the branch ref still
+    // carries this task's authoritative lineage (tip trailer + no foreign
+    // FN-attributed commits in base..branch), the work isn't lost — it's just
+    // that this attempt's integration worktree never advanced. Reset rootDir
+    // to preAttemptHeadSha so the next merge attempt starts clean, and tag
+    // the result so the caller's diagnostic includes that context.
+    const authority = await isBranchAuthoritativeForTask(rootDir, branch, taskId, preAttemptHeadSha).catch(
+      () => ({ ok: false as const, reason: "authority-probe-failed" }),
+    );
+    if (authority.ok) {
+      try {
+        await execAsync(`git reset --hard ${preAttemptHeadSha}`, { cwd: rootDir, encoding: "utf-8" });
+        await execAsync("git clean -fd", { cwd: rootDir, encoding: "utf-8" });
+        mergerLog.warn(
+          `${taskId}: finalize threw but branch ref is authoritative (tip carries Fusion-Task-Id, no foreign commits since base) — reset HEAD to ${preAttemptHeadSha.slice(0, 8)} for clean retry`,
+        );
+      } catch (resetErr: unknown) {
+        mergerLog.warn(
+          `${taskId}: branch-authoritative reset failed: ${resetErr instanceof Error ? resetErr.message : String(resetErr)}`,
+        );
+      }
+      return { ok: false, reason: "branch-ref-ahead-reset", originalError: errorMessage, branchAuthority: "ok" };
+    }
+    return {
+      ok: false,
+      reason: "unknown-phantom",
+      originalError: errorMessage,
+      branchAuthority: authority.ok ? "ok" : authority.reason,
+    };
   }
 }
 
@@ -8438,9 +8467,13 @@ export async function aiMergeTask(
                 resetMergeWithWarn(rootDir, taskId, "verification-fix finalize");
                 const classification = finalized.reason === "fix-produced-no-content"
                   ? "fix produced no content"
-                  : "unknown phantom";
+                  : finalized.reason === "branch-ref-ahead-reset"
+                    ? "branch-ref ahead of integration target (reset for retry)"
+                    : "unknown phantom";
+                const originalErrorSuffix = finalized.originalError ? ` originalError="${finalized.originalError}";` : "";
+                const authoritySuffix = finalized.branchAuthority ? ` branchAuthority=${finalized.branchAuthority};` : "";
                 throw new Error(
-                  `${taskId}: verification fix finalize failed (${classification}); preAttemptHeadSha=${preAttemptHeadSha}; currentHead=${currentHeadOut.trim()}; branch=${branch}; branchTip=${branchTipOut.trim()}.`,
+                  `${taskId}: verification fix finalize failed (${classification}); preAttemptHeadSha=${preAttemptHeadSha}; currentHead=${currentHeadOut.trim()}; branch=${branch}; branchTip=${branchTipOut.trim()};${originalErrorSuffix}${authoritySuffix}`,
                 );
               }
               return true; // Merge succeeds
@@ -8582,9 +8615,13 @@ export async function aiMergeTask(
               resetMergeWithWarn(rootDir, taskId, "build-verification fix finalize");
               const classification = finalized.reason === "fix-produced-no-content"
                 ? "fix produced no content"
-                : "unknown phantom";
+                : finalized.reason === "branch-ref-ahead-reset"
+                  ? "branch-ref ahead of integration target (reset for retry)"
+                  : "unknown phantom";
+              const originalErrorSuffix = finalized.originalError ? ` originalError="${finalized.originalError}";` : "";
+              const authoritySuffix = finalized.branchAuthority ? ` branchAuthority=${finalized.branchAuthority};` : "";
               throw new Error(
-                `${taskId}: build verification fix finalize failed (${classification}); preAttemptHeadSha=${preAttemptHeadSha}; currentHead=${currentHeadOut.trim()}; branch=${branch}; branchTip=${branchTipOut.trim()}.`,
+                `${taskId}: build verification fix finalize failed (${classification}); preAttemptHeadSha=${preAttemptHeadSha}; currentHead=${currentHeadOut.trim()}; branch=${branch}; branchTip=${branchTipOut.trim()};${originalErrorSuffix}${authoritySuffix}`,
               );
             }
             return true; // Merge succeeds
