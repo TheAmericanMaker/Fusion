@@ -8000,10 +8000,18 @@ export async function aiMergeTask(
   if (worktreePath && task.baseCommitSha) {
     try {
       throwIfAborted(options.signal, taskId);
-      const { stdout: mainHeadOut } = await execAsync("git rev-parse HEAD", {
-        cwd: rootDir,
-        encoding: "utf-8",
-      });
+      // Read the authoritative integration-branch tip from the shared ref —
+      // NOT rootDir's HEAD. In reuse-task-worktree mode rootDir's HEAD can
+      // lag behind refs/heads/<integrationBranch> when a sibling merger
+      // advanced the ref via update-ref without re-checking-out, and using a
+      // stale base sha here causes the eventual squash commit to parent off
+      // an earlier sha and orphan the previously-merged tip on a subsequent
+      // non-FF ref advance.
+      const refName = `refs/heads/${mergeTarget.branch}`;
+      const { stdout: mainHeadOut } = await execAsync(
+        `git rev-parse --verify ${refName}`,
+        { cwd: rootDir, encoding: "utf-8" },
+      );
       const mainHead = mainHeadOut.trim();
       if (mainHead) {
         const divergence = await probeDivergence({
