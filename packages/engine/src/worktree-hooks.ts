@@ -231,8 +231,8 @@ git interpret-trailers \
 `;
 }
 
-async function writeFileAtomic(targetPath: string, content: string, mode?: number): Promise<void> {
-  await execAsync(`mkdir -p ${JSON.stringify(dirname(targetPath))}`);
+export async function writeFileAtomic(targetPath: string, content: string, mode?: number): Promise<void> {
+  await fs.mkdir(dirname(targetPath), { recursive: true });
   const tmpPath = `${targetPath}.tmp`;
   const current = await fs.readFile(targetPath, "utf-8").catch(() => null);
   if (current === content) return;

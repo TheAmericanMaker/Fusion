@@ -10,12 +10,13 @@ import {
 } from "../worktree-backend.js";
 import { activeSessionRegistry } from "../active-session-registry.js";
 
-const { execMock, accessMock, existsSyncMock, parseIndexLockPathMock, classifyStaleLockMock, tryRemoveStaleLockMock, parseStaleRegistrationPathMock, recoverStaleRegistrationMock, installGuardMock } = vi.hoisted(() => {
+const { execMock, accessMock, rmMock, existsSyncMock, parseIndexLockPathMock, classifyStaleLockMock, tryRemoveStaleLockMock, parseStaleRegistrationPathMock, recoverStaleRegistrationMock, installGuardMock } = vi.hoisted(() => {
   const mock = vi.fn();
   (mock as any)[Symbol.for("nodejs.util.promisify.custom")] = mock;
   return {
     execMock: mock,
     accessMock: vi.fn(),
+    rmMock: vi.fn(),
     existsSyncMock: vi.fn(),
     parseIndexLockPathMock: vi.fn(),
     classifyStaleLockMock: vi.fn(),
@@ -28,7 +29,7 @@ const { execMock, accessMock, existsSyncMock, parseIndexLockPathMock, classifySt
 
 vi.mock("node:child_process", () => ({ exec: execMock }));
 vi.mock("node:fs", () => ({ existsSync: existsSyncMock }));
-vi.mock("node:fs/promises", () => ({ access: accessMock }));
+vi.mock("node:fs/promises", () => ({ access: accessMock, rm: rmMock }));
 vi.mock("../branch-conflicts.js", () => ({
   inspectBranchConflict: vi.fn().mockResolvedValue({ kind: "stale" }),
 }));
@@ -61,6 +62,8 @@ vi.mock("../worktree-stale-registration.js", () => ({
 beforeEach(() => {
   execMock.mockReset();
   accessMock.mockReset();
+  rmMock.mockReset();
+  rmMock.mockResolvedValue(undefined as never);
   existsSyncMock.mockReset();
   accessMock.mockResolvedValue(undefined);
   existsSyncMock.mockReturnValue(true);
@@ -113,10 +116,7 @@ describe("NativeWorktreeBackend", () => {
       }),
     ).rejects.toThrow("guard failed");
 
-    expect(execMock).toHaveBeenCalledWith(
-      'rm -rf "/repo/.worktrees/fn-1"',
-      expect.objectContaining({ cwd: "/repo", timeout: 60000, maxBuffer: 10485760 }),
-    );
+    expect(rmMock).toHaveBeenCalledWith("/repo/.worktrees/fn-1", { recursive: true, force: true });
   });
 
   it("retries with suffix and resolves", async () => {

@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AgentStore, MessageStore, PermanentAgentGatingContext, TaskDetail, Settings, TaskStore } from "@fusion/core";
 import { resolvePersistAgentThinkingLog } from "@fusion/core";
@@ -1339,7 +1340,7 @@ Follow instructions precisely and avoid unrelated changes.`,
       // Remove any partial directory left behind so the invariant holds:
       // "if .worktrees/<slug> exists on disk, it is a fully registered git worktree."
       try {
-        await execAsync(`rm -rf "${worktreePath}"`, { cwd: rootDir, env: this.options.taskEnv });
+        await rm(worktreePath, { recursive: true, force: true });
       } catch {
         // best-effort cleanup; log but don't mask the original error
         stepExecLog.log(`Warning: failed to remove partial worktree directory after creation failure: ${worktreePath}`);
@@ -1363,7 +1364,7 @@ Follow instructions precisely and avoid unrelated changes.`,
       });
     } catch (err) {
       try {
-        await execAsync(`rm -rf "${worktreePath}"`, { cwd: rootDir, env: this.options.taskEnv });
+        await rm(worktreePath, { recursive: true, force: true });
       } catch {
         stepExecLog.log(`Warning: failed to remove worktree after identity-guard install failure: ${worktreePath}`);
       }

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 const execAsync = promisify(exec);
 import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings } from "@fusion/core";
 import { RetryStormError, serializeRetryStormError } from "@fusion/core";
 import {
@@ -8901,7 +8901,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         });
       } catch (error) {
         try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+          await rm(path, { recursive: true, force: true });
         } catch {
           executorLog.log(`Warning: failed to remove worktree after identity-guard install failure: ${path}`);
         }
@@ -8918,7 +8918,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           `Removing existing directory (not a registered worktree): ${path}`,
         );
         try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+          await rm(path, { recursive: true, force: true });
         } catch (e: unknown) {
           const eMessage = e instanceof Error ? e.message : String(e);
           throw new Error(`Failed to remove existing directory ${path}: ${eMessage}`);
@@ -8940,7 +8940,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         // Remove any partial directory left behind so the invariant holds:
         // "if .worktrees/<slug> exists on disk, it is a fully registered git worktree."
         try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+          await rm(path, { recursive: true, force: true });
         } catch {
           // best-effort cleanup; log but don't mask the original error
           executorLog.log(`Warning: failed to remove partial worktree directory after creation failure: ${path}`);
@@ -8956,7 +8956,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         // Remove any partial directory left behind so the invariant holds:
         // "if .worktrees/<slug> exists on disk, it is a fully registered git worktree."
         try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+          await rm(path, { recursive: true, force: true });
         } catch {
           // best-effort cleanup; log but don't mask the original error
           executorLog.log(`Warning: failed to remove partial worktree directory after creation failure: ${path}`);
