@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MobileNavBar } from "../MobileNavBar";
+import { MOBILE_MEDIA_QUERY } from "../../hooks/useViewportMode";
 
 vi.mock("../../api", () => ({
   fetchScripts: vi.fn(),
@@ -12,7 +13,7 @@ function mockViewport(mode: "mobile" | "desktop") {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => {
-      const isMobileQuery = query === "(max-width: 768px)" || query === "(max-width: 768px), (max-height: 480px)";
+      const isMobileQuery = query === MOBILE_MEDIA_QUERY || query.includes("max-width: 768px");
       const isTabletQuery = query === "(min-width: 769px) and (max-width: 1024px)";
       return {
         matches: mode === "mobile" ? isMobileQuery : false,
