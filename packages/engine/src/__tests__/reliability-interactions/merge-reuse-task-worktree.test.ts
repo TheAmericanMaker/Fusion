@@ -424,6 +424,44 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
     }
   }, 60_000);
 
+  it.skipIf(!hasGit)("FN-5444: moving task out of in-review during live lease preserves row until release cleanup", async () => {
+    const { fixture, store, task } = await setupReuseHandoff({
+      taskId: "FN-5444-RI-COLUMN-EXIT-LIVE-LEASE",
+      fileName: "packages/engine/src/fn-5444-ri-column-exit.ts",
+      fileContent: "export const exitLease = true;\n",
+      commitMessage: "feat: add FN-5444 column exit lease coverage",
+      skipWorktreeAdd: true,
+      worktreeOverride: null,
+    });
+
+    try {
+      const lease = store.acquireMergeQueueLease("merger-reuse-handoff", {
+        targetTaskId: task.id,
+        leaseDurationMs: 60_000,
+        now: "2099-05-19T00:00:10.000Z",
+      });
+      expect(lease?.taskId).toBe(task.id);
+
+      await store.moveTask(task.id, "todo");
+      expect(store.peekMergeQueue().some((entry) => entry.taskId === task.id)).toBe(true);
+
+      const staleLeaseAudit = store.getRunAuditEvents({ taskId: task.id, mutationType: "mergeQueue:stale-lease-on-column-exit" });
+      expect(staleLeaseAudit).toHaveLength(1);
+      expect(staleLeaseAudit[0].metadata).toMatchObject({
+        taskId: task.id,
+        previousColumn: "in-review",
+        nextColumn: "todo",
+        leasedBy: "merger-reuse-handoff",
+      });
+      expect(typeof staleLeaseAudit[0].metadata?.leaseExpiresAt).toBe("string");
+
+      store.releaseMergeQueueLease(task.id, "merger-reuse-handoff", { kind: "success" });
+      expect(store.peekMergeQueue().some((entry) => entry.taskId === task.id)).toBe(false);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 60_000);
+
   it.skipIf(!hasGit)("already-landed branch auto-finalizes from the reused worktree path", async () => {
     const { fixture, rootDir, store, task, branch } = await setupReuseHandoff({
       taskId: "FN-5279-RI-ALREADY-LANDED",
