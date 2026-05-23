@@ -871,6 +871,28 @@ export function mapChangedFilesToPackageNames(
 }
 
 /**
+ * Best-effort: map a list of repo-relative file paths to the pnpm package
+ * names they belong to. Returns an empty array if pnpm-workspace.yaml is
+ * missing or unparseable — callers fall back to a directory-based heuristic.
+ *
+ * @internal Exported for testing only.
+ */
+export function packageNamesForFiles(rootDir: string, files: string[]): string[] {
+  if (files.length === 0) return [];
+  let workspaceContent: string;
+  try {
+    workspaceContent = readFileSync(join(rootDir, "pnpm-workspace.yaml"), "utf-8");
+  } catch {
+    return [];
+  }
+  const globs = parsePnpmWorkspaceGlobs(workspaceContent);
+  if (globs.length === 0) return [];
+  const packageRoots = resolveWorkspacePackageRoots(rootDir, globs);
+  if (packageRoots.length === 0) return [];
+  return mapChangedFilesToPackageNames(files, packageRoots, rootDir);
+}
+
+/**
  * Attempt to derive the set of pnpm package names touched by the branch.
  * Returns null when scoping cannot be determined (missing git context, no
  * workspace file, root-only changes, etc.) — callers fall back to `pnpm test`.
@@ -921,8 +943,11 @@ export function deriveScopedPnpmTestCommand(
   }
 
   // 5. Compose the scoped pnpm command
-  // `...^` includes dependents (packages that import the changed packages)
-  const filters = packageNames.map((name) => `--filter "${name}...^"`).join(" ");
+  // `...^` includes dependents (packages that import the changed packages).
+  // Package names come from workspace package.json files (potentially
+  // untrusted) so we quote each filter argument via `quoteArg` to prevent
+  // shell interpolation if a name contains metacharacters.
+  const filters = packageNames.map((name) => `--filter ${quoteArg(`${name}...^`)}`).join(" ");
   return `pnpm ${filters} test`;
 }
 
@@ -1113,12 +1138,13 @@ export function parseFailingFilesFromOutput(output: string): string[] {
  */
 export function getBranchChangedFiles(rootDir: string, baseBranch: string, branch: string): string[] {
   try {
-    // Use the branch ref directly when it's not HEAD
-    const range = branch === "HEAD"
-      ? `${baseBranch}...HEAD`
-      : `${baseBranch}...${branch}`;
+    // Quote both refs — branch names can legally contain `/` and other
+    // characters that, while harmless to git, would expose us to shell
+    // injection if a caller ever passed an unsanitized branch string.
+    const baseRef = quoteArg(baseBranch);
+    const headRef = branch === "HEAD" ? "HEAD" : quoteArg(branch);
     const output = execSync(
-      `git diff --name-only ${range}`,
+      `git diff --name-only ${baseRef}...${headRef}`,
       { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
     ).toString();
     return output.split("\n").map((f) => f.trim()).filter(Boolean);
@@ -1744,13 +1770,24 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
         // file paths, check whether ALL failing files are outside the branch
         // diff. If so, throw OutOfScopeVerificationError so the caller can mark
         // the task failed immediately rather than retrying into limbo.
+        //
+        // Heuristic: a failing file is "in-scope" if any branch-changed file
+        // shares the same workspace package (preferred), or — when pnpm
+        // workspace info is unavailable — if the paths share a common
+        // directory prefix. The exact-match clause catches the trivial case
+        // (test failure in the same file the branch touched).
         if (baseBranch && branch) {
           const failingFiles = parseFailingFilesFromOutput(failureContext.output);
           if (failingFiles.length > 0) {
             const branchFiles = getBranchChangedFiles(rootDir, baseBranch, branch);
             if (branchFiles.length > 0) {
-              const allOutOfScope = failingFiles.every((ff) =>
-                !branchFiles.some((bf) => bf === ff || ff.startsWith(`${bf}/`) || bf.startsWith(`${ff}/`)),
+              const branchPackages = new Set(packageNamesForFiles(rootDir, branchFiles));
+              const failingPackages = packageNamesForFiles(rootDir, failingFiles);
+              const hasPackageOverlap =
+                branchPackages.size > 0 &&
+                failingPackages.some((p) => branchPackages.has(p));
+              const allOutOfScope = !hasPackageOverlap && failingFiles.every((ff) =>
+                !branchFiles.some((bf) => bf === ff || ff.startsWith(`${bf}/`)),
               );
               if (allOutOfScope) {
                 const msg =
