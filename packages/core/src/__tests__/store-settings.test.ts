@@ -103,9 +103,9 @@ describe("TaskStore", () => {
       expect(settings.mergeStrategy).toBe("pull-request");
     });
 
-    it("defaults directMergeCommitStrategy to auto and persists updates", async () => {
+    it("defaults directMergeCommitStrategy to always-squash and persists updates", async () => {
       const defaults = await harness.store().getSettings();
-      expect(defaults.directMergeCommitStrategy).toBe("auto");
+      expect(defaults.directMergeCommitStrategy).toBe("always-squash");
 
       await harness.store().updateSettings({ directMergeCommitStrategy: "always-rebase" });
       const settings = await harness.store().getSettings();

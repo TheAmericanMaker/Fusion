@@ -2733,7 +2733,7 @@ export interface ProjectSettings {
    *  - "auto": squash single-substantive branches, preserve history for multi-substantive branches
    *  - "always-squash": always use the legacy squash path for direct merges
    *  - "always-rebase": always preserve individual branch commits during direct merges
-   *  Only applies when mergeStrategy is "direct". Default: "auto". */
+   *  Only applies when mergeStrategy is "direct". Default: "always-squash". */
   directMergeCommitStrategy?: DirectMergeCommitStrategy;
   /** Auto-merge integration-root mode.
    *  - "reuse-task-worktree" (default): run the auto-merge cascade in the task worktree

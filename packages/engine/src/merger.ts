@@ -5824,7 +5824,7 @@ function resolveDirectMergeCommitStrategy(
     return { strategy: promptOverride, source: "prompt" };
   }
   return {
-    strategy: settings.directMergeCommitStrategy ?? "auto",
+    strategy: settings.directMergeCommitStrategy ?? "always-squash",
     source: "project",
   };
 }

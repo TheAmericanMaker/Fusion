@@ -163,7 +163,7 @@ export async function advanceIntegrationBranchRef(args: {
         ["merge-base", "--is-ancestor", expectedCurrentSha, newSha],
         rootDir,
       );
-    } catch (error: unknown) {
+    } catch (_error: unknown) {
       const diagnostic = `newSha ${newSha} is not a descendant of ${expectedCurrentSha} on ${ref}`;
       await emitRefAdvance({
         succeeded: false,

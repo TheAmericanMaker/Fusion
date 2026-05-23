@@ -151,8 +151,8 @@ describe("settings key parity", () => {
     expect(DEFAULT_PROJECT_SETTINGS.completionDocumentationMode).toBe("off");
   });
 
-  it("keeps directMergeCommitStrategy project-scoped with auto default", () => {
-    expect(DEFAULT_PROJECT_SETTINGS.directMergeCommitStrategy).toBe("auto");
+  it("defaults directMergeCommitStrategy to always-squash and keeps it project-scoped", () => {
+    expect(DEFAULT_PROJECT_SETTINGS.directMergeCommitStrategy).toBe("always-squash");
     expect(isProjectSettingsKey("directMergeCommitStrategy")).toBe(true);
     expect(isGlobalSettingsKey("directMergeCommitStrategy")).toBe(false);
   });

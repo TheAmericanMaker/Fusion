@@ -122,7 +122,7 @@ Use `superviseSpawn(...)` from `@fusion/core` for managed child processes; do no
 ### Merging Branches Into Main
 
 1. **Drop duplicate commits before merging.** Rebase away duplicates already on main.
-2. **Rebase over squash for multi-commit branches.** `directMergeCommitStrategy="auto"` squashes only tiny branches.
+2. **Squash is now the project default; history-preserving merge paths require opt-in.** New projects default `directMergeCommitStrategy="always-squash"`. To preserve multi-commit history, explicitly set project `directMergeCommitStrategy` to `"auto"` or `"always-rebase"`, or set a per-task `**Direct Merge Commit Strategy:** ...` override in `PROMPT.md`.
 3. **Empty cherry-picks are no-ops.** Do not create empty commits.
 4. **Already-on-main classifier applies.** Allow finalize/self-healing recovery when lineage is landed.
 5. **Contamination auto-recovery is bounded.** First pass can auto-drop upstream foreign commits; repeated/ambiguous cases escalate.

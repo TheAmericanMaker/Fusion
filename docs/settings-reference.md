@@ -201,7 +201,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `overlapIgnorePaths` | `string[]` | `[]` | Optional project-relative file or directory paths to exclude from overlap blocking (for example `docs` or `generated/openapi.json`). Entries are trimmed, deduplicated, and must not be absolute or contain `..` traversal. |
 | `autoMerge` | `boolean` | `true` | Auto-finalize tasks from `in-review`. |
 | `mergeStrategy` | `"direct" \| "pull-request"` | `"direct"` | Completion mode (local direct merge vs PR-first). |
-| `directMergeCommitStrategy` | `"auto" \| "always-squash" \| "always-rebase"` | `"auto"` | Direct-merge commit routing mode. `auto` keeps the legacy squash path for branches with zero or one substantive commit, but switches multi-substantive direct merges to a history-preserving rebase-and-merge/cherry-pick path so commit boundaries, subjects, and `Fusion-Task-Id` trailers survive on `main`. `always-squash` forces the legacy squash path; `always-rebase` always preserves per-commit history. Only applies when `mergeStrategy="direct"`. |
+| `directMergeCommitStrategy` | `"auto" \| "always-squash" \| "always-rebase"` | `"always-squash"` | Direct-merge commit routing mode. `always-squash` (default) forces the legacy squash path. `auto` keeps the legacy squash path for branches with zero or one substantive commit, but switches multi-substantive direct merges to a history-preserving rebase-and-merge/cherry-pick path so commit boundaries, subjects, and `Fusion-Task-Id` trailers survive on `main`. `always-rebase` always preserves per-commit history. Only applies when `mergeStrategy="direct"`. |
 | `mergeIntegrationWorktree` | `"reuse-task-worktree" \| "cwd-main"` | `"reuse-task-worktree"` | Auto-merge integration-root mode for direct merges only. `reuse-task-worktree` runs the rebase/conflict/audit/finalize cascade inside the task worktree so project-root `HEAD` and dirty state stay untouched. `cwd-main` preserves the legacy project-root integration path as an escape hatch. When `worktrunk.enabled=true`, worktrunk-managed merge/worktree handling still takes precedence and this setting is effectively advisory until the native path is used. |
 | `integrationBranch` | `string` | `undefined` | Optional canonical project integration branch override. Resolution order for merge/self-healing/branch-conflict defaults is `integrationBranch` → legacy `baseBranch` → `origin/HEAD` symbolic ref → fallback `"main"`. This resolved value is used as `projectDefaultBranch` for `resolveTaskMergeTarget(...)`; task-level overrides still come from task metadata. |
 | `prerebaseAutoEnabled` | `boolean` | `true` | Master switch for pre-merge auto-prerebase policy. When enabled, merger checks divergence from `<task.baseCommitSha>` to local `main` and may rebase before Stage 1/2 rebases. Ignored when `worktrunk.enabled=true` (worktrunk-managed path defers this layer). |
@@ -235,7 +235,7 @@ Accepted values:
 Override precedence for direct merges is:
 1. Task `PROMPT.md` line `**Direct Merge Commit Strategy:** ...`
 2. Project `directMergeCommitStrategy`
-3. Default `"auto"`
+3. Default `"always-squash"`
 
 ### Sandbox settings
 
