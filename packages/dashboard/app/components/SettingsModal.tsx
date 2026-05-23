@@ -4617,6 +4617,37 @@ export function SettingsModal({
                 </small>
               </details>
             </div>
+            <div className="form-group">
+              <label htmlFor="integrationBranch">Integration branch</label>
+              <input
+                id="integrationBranch"
+                type="text"
+                className="input"
+                placeholder="auto-detect (origin/HEAD → main)"
+                value={form.integrationBranch ?? ""}
+                onChange={(e) => {
+                  const trimmed = e.target.value.trim();
+                  setForm((f) => ({
+                    ...f,
+                    integrationBranch: trimmed.length === 0 ? undefined : trimmed,
+                  }));
+                }}
+                data-testid="integration-branch-input"
+              />
+              <details className="settings-option-details">
+                <summary>More details</summary>
+                <small>
+                  The canonical branch Fusion merges tasks into and uses as the reference for all
+                  ahead/behind / overlap / pre-rebase computations. Leave blank to auto-resolve
+                  (<code>integrationBranch</code> → legacy <code>baseBranch</code> →
+                  <code>origin/HEAD</code> symbolic ref → fallback <code>main</code>). Set
+                  explicitly for projects whose default branch is <code>master</code>,
+                  <code>trunk</code>, <code>develop</code>, or any other name. Applies to both
+                  direct merges and pull-request mode; individual tasks can still override via
+                  task metadata.
+                </small>
+              </details>
+            </div>
             {form.mergeStrategy !== "pull-request" && (
               <>
                 <div className="form-group">
