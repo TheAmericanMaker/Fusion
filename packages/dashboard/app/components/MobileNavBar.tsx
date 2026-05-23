@@ -116,7 +116,7 @@ export function MobileNavBar({
   onChangeView,
   footerVisible,
   modalOpen = false,
-  keyboardOpen: _keyboardOpen = false,
+  keyboardOpen = false,
   onOpenSettings,
   onOpenActivityLog,
   onOpenSystemStats,
@@ -281,7 +281,7 @@ export function MobileNavBar({
     <>
       <nav
         ref={navRef}
-        className={`mobile-nav-bar${footerVisible ? " mobile-nav-bar--with-footer" : ""}`}
+        className={`mobile-nav-bar${footerVisible ? " mobile-nav-bar--with-footer" : ""}${keyboardOpen ? " mobile-nav-bar--keyboard-open" : ""}`}
         role="tablist"
         aria-label="Primary navigation"
       >
