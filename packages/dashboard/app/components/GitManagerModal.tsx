@@ -1173,6 +1173,14 @@ function StatusPanel({
               <span className="gm-status-value">
                 {status.originIntegrationTipSha === null ? (
                   <span className="gm-status-sub">no origin tracking</span>
+                ) : status.integrationTipSource === "remote-only" ? (
+                  // Local branch doesn't exist — comparing "local vs origin"
+                  // is undefined. Show an honest state instead of a green
+                  // "Synced" badge that would imply the local ref is in
+                  // sync with origin when there's no local ref at all.
+                  <span className="gm-status-sub" title="No local refs/heads/<branch> exists; nothing to compare against origin.">
+                    no local tracking
+                  </span>
                 ) : (status.aheadOfOriginIntegration ?? 0) === 0 && (status.behindOriginIntegration ?? 0) === 0 ? (
                   <span className="gm-in-sync">
                     <CheckCircle size={12} />
@@ -1190,6 +1198,38 @@ function StatusPanel({
                       <span className="gm-behind" title={`Local ${status.integrationBranch} is ${status.behindOriginIntegration} commit(s) behind origin/${status.integrationBranch}`}>
                         <ArrowDown size={12} />
                         {status.behindOriginIntegration}
+                      </span>
+                    )}
+                  </>
+                )}
+              </span>
+            </div>
+          )}
+          {status.integrationTipSource === "remote-only" && status.aheadOfIntegrationRemote !== undefined && (
+            // In remote-only mode the `HEAD vs <branch>` card is suppressed
+            // (no local tip to compare against). Surface a dedicated HEAD vs
+            // origin/<branch> card so the operator still sees a meaningful
+            // distance.
+            <div className="gm-status-card">
+              <span className="gm-status-label">HEAD vs origin/{status.integrationBranch}</span>
+              <span className="gm-status-value">
+                {(status.aheadOfIntegrationRemote ?? 0) === 0 && (status.behindIntegrationRemote ?? 0) === 0 ? (
+                  <span className="gm-in-sync">
+                    <CheckCircle size={12} />
+                    Aligned
+                  </span>
+                ) : (
+                  <>
+                    {(status.aheadOfIntegrationRemote ?? 0) > 0 && (
+                      <span className="gm-ahead" title={`HEAD has ${status.aheadOfIntegrationRemote} commit(s) not on origin/${status.integrationBranch}`}>
+                        <ArrowUp size={12} />
+                        {status.aheadOfIntegrationRemote}
+                      </span>
+                    )}
+                    {(status.behindIntegrationRemote ?? 0) > 0 && (
+                      <span className="gm-behind" title={`origin/${status.integrationBranch} has ${status.behindIntegrationRemote} commit(s) HEAD doesn't`}>
+                        <ArrowDown size={12} />
+                        {status.behindIntegrationRemote}
                       </span>
                     )}
                   </>

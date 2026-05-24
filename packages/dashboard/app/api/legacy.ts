@@ -2583,14 +2583,27 @@ export interface GitStatus {
   integrationBranch?: string;
   integrationBranchSource?: "settings" | "origin-head" | "fallback";
   isOnIntegrationBranch?: boolean;
+  /** True when `git branch --show-current` failed (transient git error,
+   *  permission, etc.). Distinct from detached HEAD (command succeeds with
+   *  empty stdout). UI surfaces "branch detection unavailable" rather than
+   *  silently hiding the wrong-branch warning. */
+  currentBranchDetectionFailed?: boolean;
   integrationTipSha?: string | null;
   /** "local" = `refs/heads/<branch>` exists; "remote-only" = only
    *  `refs/remotes/origin/<branch>` exists and was used as fallback;
    *  "missing" = neither ref exists. */
   integrationTipSource?: "local" | "remote-only" | "missing";
   originIntegrationTipSha?: string | null;
+  /** HEAD vs the **local** integration tip. Undefined when the branch
+   *  exists only as a remote-tracking ref. */
   aheadOfIntegration?: number;
   behindIntegration?: number;
+  /** HEAD vs `origin/<integrationBranch>`. Defined whenever the remote
+   *  tracking ref exists, regardless of whether the local ref does. */
+  aheadOfIntegrationRemote?: number;
+  behindIntegrationRemote?: number;
+  /** Local integration tip vs `origin/<integrationBranch>`. Defined only
+   *  when both refs exist. */
   aheadOfOriginIntegration?: number;
   behindOriginIntegration?: number;
   dirtyDetails?: {

@@ -400,6 +400,11 @@ export interface ExtendedGitStatus {
   integrationBranch?: string;
   integrationBranchSource?: "settings" | "origin-head" | "fallback";
   isOnIntegrationBranch?: boolean;
+  /** True when `git branch --show-current` failed (timeout, permission, etc.)
+   *  — distinct from the legitimate detached-HEAD case where the command
+   *  succeeds with empty stdout. UI should surface "branch detection
+   *  unavailable" rather than silently hiding the wrong-branch warning. */
+  currentBranchDetectionFailed?: boolean;
   integrationTipSha?: string | null;
   /** Where `integrationTipSha` was resolved from. `"local"` = the branch
    *  exists locally; `"remote-only"` = the branch only exists as
@@ -407,8 +412,17 @@ export interface ExtendedGitStatus {
    *  neither ref exists, so the integration tip is null. */
   integrationTipSource?: "local" | "remote-only" | "missing";
   originIntegrationTipSha?: string | null;
+  /** HEAD vs the **local** integration tip. Undefined when the branch
+   *  exists only as a remote-tracking ref. */
   aheadOfIntegration?: number;
   behindIntegration?: number;
+  /** HEAD vs `origin/<integrationBranch>`. Defined whenever the remote
+   *  tracking ref exists, regardless of whether the local ref does. Useful
+   *  in remote-only mode (and as an unambiguous comparison in any mode). */
+  aheadOfIntegrationRemote?: number;
+  behindIntegrationRemote?: number;
+  /** Local integration tip vs `origin/<integrationBranch>`. Defined only
+   *  when both refs exist. */
   aheadOfOriginIntegration?: number;
   behindOriginIntegration?: number;
   dirtyDetails?: {
@@ -490,35 +504,49 @@ async function computeDirtyDetails(cwd: string): Promise<ExtendedGitStatus["dirt
   }
 }
 
-async function isIndexStale(cwd: string, integrationBranch: string): Promise<boolean | undefined> {
+async function isIndexStale(
+  cwd: string,
+  integrationBranch: string,
+  isOnIntegrationBranch: boolean | undefined,
+): Promise<boolean | undefined> {
   // The FN-INDEX-DESYNC scenario: the merger advanced refs/heads/<integration>
-  // locally so HEAD points at the new tip, but the index still reflects the
-  // *previous* tip. Detect precisely by comparing the index against
-  // `refs/heads/<integration>@{1}` (the reflog entry for the tip BEFORE the
-  // advance) — if `git diff-index --cached <prevTip>` is empty, the index
-  // exactly matches the pre-advance state, and HEAD must be a descendant of
-  // that prev tip for the signal to be the merger's doing rather than a
-  // hand-staged reset.
+  // locally so HEAD points at the new tip, but the index still reflects an
+  // *earlier* tip. Detect by walking `refs/heads/<integration>` reflog and
+  // checking whether the index exactly matches any of the recent prior tips
+  // (with HEAD descending from that prior tip). Walking the reflog (not just
+  // `@{1}`) catches multi-hop misses: if the merger advanced A→B→C without
+  // the rootDir worktree being synced in between, the index still holds A's
+  // tree while `@{1}` is now B; comparing only against B would miss this.
   //
-  // The earlier heuristic (`diff --cached --name-only` non-empty AND
-  // `diff --name-only` empty) fired both false-positive on legitimate
-  // `git add` work and false-negative when the user had any unrelated
-  // worktree edit. The reflog-anchored check is unambiguous.
+  // Only fires when the worktree is actually on the integration branch.
+  // A feature-branch worktree whose HEAD happens to equal `<integration>@{1}`
+  // (e.g. user just `git switch -c hotfix main@{N}`) is a perfectly healthy
+  // state, not a stale-index situation.
+  if (isOnIntegrationBranch !== true) return false;
   try {
-    const prevTip = await revParse(cwd, `refs/heads/${integrationBranch}@{1}`);
-    if (!prevTip) return false;
     const headSha = await revParse(cwd, "HEAD");
-    if (!headSha || headSha === prevTip) return false;
-    let isDescendant = false;
-    try {
-      await runGitCommand(["merge-base", "--is-ancestor", prevTip, "HEAD"], cwd, 5_000);
-      isDescendant = true;
-    } catch {
-      isDescendant = false;
+    if (!headSha) return false;
+    // Walk up to 16 reflog entries. The merger's typical burst is a handful
+    // of advances; 16 is a comfortable ceiling that still bounds the work.
+    const REFLOG_DEPTH = 16;
+    for (let i = 1; i <= REFLOG_DEPTH; i++) {
+      const prevTip = await revParse(cwd, `refs/heads/${integrationBranch}@{${i}}`);
+      if (!prevTip) return false; // reflog exhausted (or pruned)
+      if (prevTip === headSha) continue; // not actually a prior state
+      // HEAD must descend from this prior tip — otherwise the operator
+      // rolled back the branch and the "stale" framing doesn't apply.
+      let isDescendant = false;
+      try {
+        await runGitCommand(["merge-base", "--is-ancestor", prevTip, "HEAD"], cwd, 5_000);
+        isDescendant = true;
+      } catch {
+        isDescendant = false;
+      }
+      if (!isDescendant) continue;
+      const diffOut = (await runGitCommand(["diff-index", "--cached", "--name-only", prevTip], cwd, 5_000)).trim();
+      if (diffOut.length === 0) return true; // index exactly matches this prior tip → stale
     }
-    if (!isDescendant) return false;
-    const diffOut = (await runGitCommand(["diff-index", "--cached", "--name-only", prevTip], cwd, 5_000)).trim();
-    return diffOut.length === 0;
+    return false;
   } catch {
     return undefined;
   }
@@ -565,13 +593,16 @@ async function collectRecentMergeAdvances(
     mutationType: "merge:integration-ref-advance",
     limit: 10,
   });
-  // Key by (taskId, newSha) so each specific advance is paired with its own
-  // outcome — the previous map-by-taskId scheme paired older advances with
-  // the most-recent task's outcome whenever a task generated multiple
-  // advances over time. Auto-sync events store the destination tip in
-  // `metadata.newSha` (set by the merger's runMergeAdvanceAutoSync hook).
+  // Auto-sync events come in two flavors:
+  //  - per-advance: emit with `worktreePath` + `newSha`; pair by (taskId, newSha)
+  //  - early-failure (`outcome: "enumeration-failed"`): emitted by the merger
+  //    when worktree enumeration fails BEFORE any advance was processed, so
+  //    they carry NO `worktreePath` and NO `newSha`. We still want operators
+  //    to see these — pair them by taskId-only as a fallback so the matching
+  //    advance shows the actual reason instead of "no auto-sync record."
   const wantPath = canonicalForCompare(worktreePath);
   const autoSyncByAdvance = new Map<string, string>();
+  const autoSyncByTaskFallback = new Map<string, string>();
   const pairKey = (tid: string, toSha: string) => `${tid}:${toSha}`;
   for (const ev of scopedStore.getRunAuditEvents({
     domain: "git",
@@ -580,16 +611,24 @@ async function collectRecentMergeAdvances(
   })) {
     const md = ev.metadata as { worktreePath?: unknown; outcome?: unknown; taskId?: unknown; newSha?: unknown } | undefined;
     if (!md || typeof md !== "object") continue;
-    if (typeof md.worktreePath !== "string") continue;
-    if (canonicalForCompare(md.worktreePath) !== wantPath) continue;
     if (typeof md.outcome !== "string") continue;
-    if (typeof md.newSha !== "string") continue;
     const tid = typeof md.taskId === "string" ? md.taskId : (typeof ev.taskId === "string" ? ev.taskId : "");
     if (!tid) continue;
-    const key = pairKey(tid, md.newSha);
-    // Events are timestamp DESC; the first occurrence of (tid, newSha) is the
-    // freshest outcome for that specific advance — keep it.
-    if (!autoSyncByAdvance.has(key)) autoSyncByAdvance.set(key, md.outcome);
+    const hasPath = typeof md.worktreePath === "string";
+    const hasNewSha = typeof md.newSha === "string";
+    if (hasPath && hasNewSha) {
+      // Per-advance event for a specific worktree: only attribute to this
+      // user's checkout when the canonicalized paths match.
+      if (canonicalForCompare(md.worktreePath as string) !== wantPath) continue;
+      const key = pairKey(tid, md.newSha as string);
+      // Events are timestamp DESC; first occurrence is the freshest.
+      if (!autoSyncByAdvance.has(key)) autoSyncByAdvance.set(key, md.outcome);
+    } else if (!hasPath && !hasNewSha) {
+      // Early-failure event (e.g. "enumeration-failed"): no per-worktree
+      // attribution possible — apply to every advance for this task.
+      if (!autoSyncByTaskFallback.has(tid)) autoSyncByTaskFallback.set(tid, md.outcome);
+    }
+    // Events with one of the two but not the other are malformed; skip.
   }
   const successOutcomes = new Set(["clean-sync", "synced-with-edits-restored"]);
   const out: NonNullable<ExtendedGitStatus["recentMergeAdvances"]> = [];
@@ -600,7 +639,9 @@ async function collectRecentMergeAdvances(
     if (md.succeeded === false) continue;
     const tid = typeof ev.taskId === "string" ? ev.taskId : "";
     if (!tid) continue;
-    const autoSyncOutcome = autoSyncByAdvance.get(pairKey(tid, md.toSha));
+    const autoSyncOutcome =
+      autoSyncByAdvance.get(pairKey(tid, md.toSha))
+      ?? autoSyncByTaskFallback.get(tid);
     out.push({
       taskId: tid,
       fromSha: typeof md.fromSha === "string" ? md.fromSha : null,
@@ -620,18 +661,29 @@ export async function computeExtendedGitStatus(rootDir: string, scopedStore: Tas
     rootDir,
     settings as { integrationBranch?: unknown; baseBranch?: unknown } | null,
   );
-  let currentBranch = "";
+  // Distinguish three states:
+  //   - command succeeded with branch name → "on <name>"
+  //   - command succeeded with empty stdout → detached HEAD (legitimate)
+  //   - command threw → unknown (transient git failure, .git/index.lock
+  //     contention, etc.)
+  // The middle two collapse to `isOnIntegrationBranch: undefined` so the
+  // UI suppresses the misleading "(not on <branch>)" sub-text in BOTH
+  // cases. We tag the failure case separately so the UI can surface a
+  // "branch detection unavailable" hint rather than silently rendering
+  // nothing — masking a genuine wrong-branch state because of a
+  // transient git error would mislead the operator just as much as the
+  // detached-HEAD case the comment originally claimed to fix.
+  let currentBranch: string | null = null;
+  let currentBranchDetectionFailed = false;
   try {
     currentBranch = (await runGitCommand(["branch", "--show-current"], rootDir, 5_000)).trim();
   } catch {
-    // Detached HEAD / non-git rootDir / corrupted state — leave currentBranch
-    // empty and let isOnIntegrationBranch resolve to undefined below so the
-    // UI doesn't render a misleading "(not on <branch>)" sub-text.
+    currentBranchDetectionFailed = true;
   }
-  // `git branch --show-current` returns empty on detached HEAD; treat that as
-  // "unknown" rather than "definitely not on the integration branch" so the
-  // UI can render an honest detached-HEAD state instead of "(not on main)".
-  const isOnIntegrationBranch = currentBranch.length === 0 ? undefined : currentBranch === integrationBranch;
+  const isOnIntegrationBranch =
+    currentBranchDetectionFailed || currentBranch === null || currentBranch.length === 0
+      ? undefined
+      : currentBranch === integrationBranch;
   const headSha = (await revParse(rootDir, "HEAD")) ?? undefined;
   // Prefer the local head; fall back to the remote-tracking ref so projects
   // whose `integrationBranch` setting names a branch that exists only on
@@ -644,11 +696,24 @@ export async function computeExtendedGitStatus(rootDir: string, scopedStore: Tas
   const integrationTipSource: ExtendedGitStatus["integrationTipSource"] =
     localIntegrationTip ? "local" : originIntegrationTipSha ? "remote-only" : "missing";
 
+  // `aheadOfIntegration` / `behindIntegration` is HEAD vs the **local**
+  // integration tip — undefined when the branch exists only as a
+  // remote-tracking ref. `aheadOfIntegrationRemote` / `behindIntegrationRemote`
+  // is HEAD vs `origin/<branch>` — defined whenever the remote tracking ref
+  // exists, regardless of local. Keeping the two distances under distinct
+  // names removes the silent semantics shift the prior single-field flavor
+  // produced in remote-only mode.
   let aheadOfIntegration: number | undefined;
   let behindIntegration: number | undefined;
-  if (integrationTipSha && headSha) {
-    const ab = await aheadBehind(rootDir, "HEAD", integrationTipSha);
+  if (localIntegrationTip && headSha) {
+    const ab = await aheadBehind(rootDir, "HEAD", localIntegrationTip);
     if (ab) { aheadOfIntegration = ab.ahead; behindIntegration = ab.behind; }
+  }
+  let aheadOfIntegrationRemote: number | undefined;
+  let behindIntegrationRemote: number | undefined;
+  if (originIntegrationTipSha && headSha) {
+    const ab = await aheadBehind(rootDir, "HEAD", originIntegrationTipSha);
+    if (ab) { aheadOfIntegrationRemote = ab.ahead; behindIntegrationRemote = ab.behind; }
   }
   let aheadOfOriginIntegration: number | undefined;
   let behindOriginIntegration: number | undefined;
@@ -659,7 +724,7 @@ export async function computeExtendedGitStatus(rootDir: string, scopedStore: Tas
 
   const [dirtyDetails, indexStaleVsHead, stashCount, recentMergeAdvances] = await Promise.all([
     computeDirtyDetails(rootDir),
-    isIndexStale(rootDir, integrationBranch),
+    isIndexStale(rootDir, integrationBranch, isOnIntegrationBranch),
     computeStashCount(rootDir),
     collectRecentMergeAdvances(
       scopedStore as TaskStore & {
@@ -674,9 +739,12 @@ export async function computeExtendedGitStatus(rootDir: string, scopedStore: Tas
     integrationBranch,
     integrationBranchSource,
     isOnIntegrationBranch,
+    currentBranchDetectionFailed: currentBranchDetectionFailed || undefined,
     integrationTipSha,
     integrationTipSource,
     originIntegrationTipSha,
+    aheadOfIntegrationRemote,
+    behindIntegrationRemote,
     aheadOfIntegration,
     behindIntegration,
     aheadOfOriginIntegration,

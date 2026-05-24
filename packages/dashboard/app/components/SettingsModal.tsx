@@ -2065,16 +2065,20 @@ export function SettingsModal({
             }
           }
         } else {
-          // For non-model settings: pass value through. Apply the same
-          // null-as-delete semantics as the global patch builder above so the
-          // user can actually CLEAR an explicit value (e.g. unpin
-          // `integrationBranch` back to auto-detect). Without this, setting
-          // the form value to `undefined` causes JSON.stringify to drop the
-          // key and the server retains the previous explicit value.
-          if (value === undefined && initialProjectValue !== undefined && initialProjectValue !== null) {
-            (projectPatch as Record<string, unknown>)[key] = null;
-          } else {
-            (projectPatch as Record<string, unknown>)[key] = value;
+          // For non-model settings: only write keys the user actually
+          // changed, matching the model-lane gate above. Without this,
+          // every effective/inherited value in `payload` would be
+          // serialized as an explicit project override, silently breaking
+          // inheritance for every project setting on every save.
+          // Within the changed-set, apply null-as-delete so an explicit
+          // clear (e.g. unpinning `integrationBranch` back to auto-detect)
+          // survives `JSON.stringify` instead of being silently dropped.
+          if (value !== initialProjectValue) {
+            if (value === undefined && initialProjectValue !== undefined && initialProjectValue !== null) {
+              (projectPatch as Record<string, unknown>)[key] = null;
+            } else if (value !== undefined) {
+              (projectPatch as Record<string, unknown>)[key] = value;
+            }
           }
         }
       }
