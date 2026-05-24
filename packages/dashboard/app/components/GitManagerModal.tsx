@@ -10,6 +10,7 @@ import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useViewportMode } from "../hooks/useViewportMode";
+import { subscribeSse } from "../sse-bus";
 import type {
   GitStatus,
   GitCommit,
@@ -23,6 +24,8 @@ import type {
   GitRemoteDetailed,
 } from "../api";
 import {
+  api,
+  fetchConfig,
   fetchGitStatus,
   fetchGitCommits,
   fetchCommitDiff,
@@ -86,11 +89,22 @@ import {
   XCircle,
   Send,
   Pencil,
+  Info,
 } from "lucide-react";
 
 // ── Types & Constants ─────────────────────────────────────────────
 
 type SectionId = "status" | "changes" | "commits" | "branches" | "worktrees" | "stashes" | "remotes";
+
+interface MergeAdvanceEvent {
+  taskId: string;
+  integrationBranch: string;
+  toSha: string;
+  fromSha: string | null;
+  advanceMode: "fast-forward" | "non-fast-forward" | "update-ref" | string;
+  succeeded: boolean;
+  advancedAt: string;
+}
 
 const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
   { id: "status", label: "Status", icon: Radio },
@@ -215,6 +229,10 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
 
   // ── Status state
   const [status, setStatus] = useState<GitStatus | null>(null);
+
+  // ── Integration advance events state
+  const [mergeAdvanceEvents, setMergeAdvanceEvents] = useState<MergeAdvanceEvent[]>([]);
+  const [rootDir, setRootDir] = useState<string | null>(null);
 
   // ── Changes state
   const [fileChanges, setFileChanges] = useState<GitFileChange[]>([]);
@@ -812,6 +830,68 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     }
   }, [addToast, projectId]);
 
+  // ── Integration advance events ──────────────────────────────────
+
+  const fetchMergeAdvanceEvents = useCallback(async () => {
+    try {
+      const query = new URLSearchParams({ limit: "5" });
+      if (projectId) query.set("projectId", projectId);
+      const response = await api<{ events: MergeAdvanceEvent[] }>(`/tasks/merge-advance-events?${query.toString()}`);
+      setMergeAdvanceEvents(Array.isArray(response.events) ? response.events.filter((e) => e.succeeded) : []);
+    } catch {
+      setMergeAdvanceEvents([]);
+    }
+  }, [projectId]);
+
+  // Fetch rootDir from config (used as worktreePath for sync button)
+  useEffect(() => {
+    fetchConfig(projectId).then((cfg) => setRootDir(cfg.rootDir)).catch(() => setRootDir(null));
+  }, [projectId]);
+
+  // Fetch events on open and subscribe to SSE for live updates
+  useEffect(() => {
+    if (!isOpen) return;
+    void fetchMergeAdvanceEvents();
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    const unsubscribe = subscribeSse(`/api/events${query}`, {
+      events: {
+        "task:merged": () => {
+          void fetchMergeAdvanceEvents();
+        },
+      },
+    });
+    return () => unsubscribe();
+  }, [isOpen, fetchMergeAdvanceEvents, projectId]);
+
+  const handleSyncIntegrationTip = useCallback(async () => {
+    if (!status?.integrationBranch || status.isOnIntegrationBranch === false) return;
+    const worktreePath = rootDir;
+    if (!worktreePath) {
+      addToast("Project root path not available", "error");
+      return;
+    }
+    setRemoteLoading("sync-integration");
+    try {
+      const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+      await api(`/git/pull${query}`, {
+        method: "POST",
+        body: JSON.stringify({
+          worktreePath,
+          integrationBranch: status.integrationBranch,
+          taskId: undefined,
+        }),
+      });
+      addToast("Synced worktree to integration tip", "success");
+      const statusData = await fetchGitStatus(projectId, { extended: true });
+      setStatus(statusData);
+      await fetchMergeAdvanceEvents();
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Sync failed", "error");
+    } finally {
+      setRemoteLoading(null);
+    }
+  }, [addToast, fetchMergeAdvanceEvents, projectId, rootDir, status?.integrationBranch, status?.isOnIntegrationBranch]);
+
   // ── Derived state ───────────────────────────────────────────────
 
   const stagedFiles = useMemo(() => fileChanges.filter((f) => f.staged), [fileChanges]);
@@ -887,7 +967,20 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
 
             {/* ── Status Panel ── */}
             {activeSection === "status" && !loading && status && (
-              <StatusPanel status={status} copyToClipboard={copyToClipboard} />
+              <StatusPanel
+                status={status}
+                copyToClipboard={copyToClipboard}
+                onSyncWorkingTree={() => handlePull({ rebase: false })}
+                syncing={remoteLoading === "pull"}
+                mergeAdvanceEvents={mergeAdvanceEvents}
+                onSyncIntegrationTip={handleSyncIntegrationTip}
+                syncingIntegration={remoteLoading === "sync-integration"}
+                syncIntegrationDisabled={
+                  !status.integrationBranch ||
+                  status.isOnIntegrationBranch === false ||
+                  remoteLoading !== null
+                }
+              />
             )}
 
             {/* ── Changes Panel ── */}
@@ -989,6 +1082,12 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
                 onFetch={handleFetch}
                 onPull={handlePull}
                 onPush={handlePush}
+                onSyncIntegrationTip={handleSyncIntegrationTip}
+                syncIntegrationDisabled={
+                  !status?.integrationBranch ||
+                  status?.isOnIntegrationBranch === false ||
+                  remoteLoading !== null
+                }
                 addToast={addToast}
                 projectId={projectId}
                 copyToClipboard={copyToClipboard}
@@ -1007,10 +1106,23 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
 function StatusPanel({
   status,
   copyToClipboard,
+  onSyncWorkingTree,
+  syncing,
+  mergeAdvanceEvents,
+  onSyncIntegrationTip,
+  syncingIntegration,
+  syncIntegrationDisabled,
 }: {
   status: GitStatus;
   copyToClipboard: (text: string, label?: string) => void;
+  onSyncWorkingTree: () => void;
+  syncing: boolean;
+  mergeAdvanceEvents: MergeAdvanceEvent[];
+  onSyncIntegrationTip: () => void;
+  syncingIntegration: boolean;
+  syncIntegrationDisabled: boolean;
 }) {
+  const [advancesHelpOpen, setAdvancesHelpOpen] = useState(false);
   return (
     <div className="gm-panel" data-testid="status-panel">
       <div className="gm-panel-header">
@@ -1248,6 +1360,47 @@ function StatusPanel({
           )}
         </div>
       )}
+      {status.integrationBranch && (
+        <div className="gm-integration-actions" data-testid="integration-actions">
+          <button
+            className="btn btn-sm gm-sync-integration-btn"
+            onClick={onSyncIntegrationTip}
+            disabled={syncIntegrationDisabled}
+            title={
+              !status.integrationBranch
+                ? "No integration branch configured"
+                : status.isOnIntegrationBranch === false
+                ? `Not on integration branch (${status.integrationBranch})`
+                : "Sync working tree to local integration tip"
+            }
+            data-testid="sync-integration-tip-btn"
+          >
+            {syncingIntegration ? (
+              <Loader2 size={14} className="spin" />
+            ) : (
+              <GitMerge size={14} />
+            )}
+            Sync local tip
+          </button>
+        </div>
+      )}
+      {mergeAdvanceEvents.length > 0 && (
+        <div className="gm-recent-advances" data-testid="recent-advance-events">
+          <div className="gm-recent-advances-header">Recent integration advances</div>
+          <ul className="gm-recent-advances-list">
+            {mergeAdvanceEvents.map((event) => (
+              <li key={`${event.taskId}-${event.toSha}`} className="gm-recent-advance-item">
+                <code className="gm-hash">{event.toSha.slice(0, 8)}</code>
+                {" "}
+                <span className="gm-recent-advance-task">{event.taskId}</span>
+                <span className="gm-status-sub">
+                  {" · "}{relativeDate(event.advancedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {status.indexStaleVsHead === true && (
         <div className="gm-status-warning" data-testid="index-stale-warning" role="alert">
           <AlertCircle size={14} />
@@ -1264,11 +1417,57 @@ function StatusPanel({
       {(status.recentMergeAdvances ?? []).length > 0 && (
         <div className="gm-status-advances" data-testid="recent-merge-advances">
           <div className="gm-status-advances-header">
-            Recent integration-branch advances
-            <span className="gm-status-sub">
-              {" "}({(status.recentMergeAdvances ?? []).filter((a) => a.needsAction).length} need action)
+            <span>
+              Recent integration-branch advances
+              <span className="gm-status-sub">
+                {" "}({(status.recentMergeAdvances ?? []).filter((a) => a.needsAction).length} need action)
+              </span>
+              <button
+                type="button"
+                className="gm-icon-btn"
+                style={{ marginLeft: 6 }}
+                aria-expanded={advancesHelpOpen}
+                aria-label={advancesHelpOpen ? "Hide explanation" : "What does this mean?"}
+                onClick={() => setAdvancesHelpOpen((open) => !open)}
+                title="What does this mean?"
+              >
+                <Info size={13} />
+              </button>
             </span>
+            {(status.recentMergeAdvances ?? []).some((a) => a.needsAction) && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={onSyncWorkingTree}
+                disabled={syncing}
+                data-testid="sync-working-tree-btn"
+                title="Pull the integration branch into your working tree (auto-stashes uncommitted edits and restores them)"
+              >
+                {syncing ? "Syncing…" : "Sync working tree"}
+              </button>
+            )}
           </div>
+          {advancesHelpOpen && (
+            <div className="gm-status-advances-help" data-testid="recent-merge-advances-help">
+              <p>
+                Each entry is a Fusion task whose squash commit advanced the
+                integration branch ref (<code>{status.integrationBranch ?? "main"}</code>).
+                The <em>auto-sync outcome</em> says whether your working tree
+                was also fast-forwarded to that new tip.
+              </p>
+              <ul className="gm-status-advances-help-list">
+                <li><code>clean-sync</code> / <code>synced-with-edits-restored</code> — working tree is in sync; nothing to do.</li>
+                <li><code>off / not run</code> — auto-sync is disabled in Settings; the branch ref moved but your worktree didn&apos;t follow.</li>
+                <li><code>stash-failed</code> / <code>would-conflict</code> / similar — auto-sync tried but couldn&apos;t reconcile (usually local edits collide with the new commit).</li>
+              </ul>
+              <p>
+                <strong>Fix:</strong> click <em>Sync working tree</em> to pull
+                now (uncommitted edits are auto-stashed and restored). To make
+                this automatic going forward, enable{" "}
+                <code>mergeAdvanceAutoSync</code> in Settings.
+              </p>
+            </div>
+          )}
           <ul>
             {(status.recentMergeAdvances ?? []).map((advance) => (
               <li key={`${advance.taskId}-${advance.toSha}`} className={advance.needsAction ? "gm-advance-needs-action" : "gm-advance-handled"}>
@@ -2117,6 +2316,8 @@ function RemotesPanel({
   onFetch,
   onPull,
   onPush,
+  onSyncIntegrationTip,
+  syncIntegrationDisabled,
   addToast,
   projectId,
   copyToClipboard,
@@ -2127,6 +2328,8 @@ function RemotesPanel({
   onFetch: () => void;
   onPull: (options?: { rebase?: boolean }) => void;
   onPush: () => void;
+  onSyncIntegrationTip: () => void;
+  syncIntegrationDisabled: boolean;
   addToast: (message: string, type?: ToastType) => void;
   projectId?: string;
   copyToClipboard: (text: string, label?: string) => void;
@@ -2630,6 +2833,26 @@ function RemotesPanel({
                     )}
                     Push
                   </button>
+                  {status?.integrationBranch && (
+                    <button
+                      className="btn gm-sync-integration-btn"
+                      onClick={onSyncIntegrationTip}
+                      disabled={syncIntegrationDisabled}
+                      title={
+                        status.isOnIntegrationBranch === false
+                          ? `Not on integration branch (${status.integrationBranch})`
+                          : "Sync working tree to local integration tip (same as banner Pull)"
+                      }
+                      data-testid="remotes-sync-integration-tip-btn"
+                    >
+                      {remoteLoading === "sync-integration" ? (
+                        <Loader2 size={14} className="spin" />
+                      ) : (
+                        <GitMerge size={14} />
+                      )}
+                      Sync local tip
+                    </button>
+                  )}
                 </div>
               </div>
 

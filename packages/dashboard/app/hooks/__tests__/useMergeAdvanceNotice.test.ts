@@ -133,7 +133,7 @@ describe("useMergeAdvanceNotice", () => {
       return { ok: true, outcome: "ok", localSha: "localsha", remoteSha: "localsha" };
     });
     const { result } = renderHook(() => useMergeAdvanceNotice({ projectId: "p1-pull-clean" }));
-    await waitFor(() => expect(result.current.notice).not.toBeNull());
+    await waitFor(() => expect(result.current.notice).toBeDefined());
     await act(async () => { await result.current.pull(); });
     expect(mocked.api.mock.calls.some((call) => String(call[0]).startsWith("/git/pull?projectId=p1-pull-clean"))).toBe(true);
     expect(result.current.conflictState).toBeNull();
@@ -141,7 +141,7 @@ describe("useMergeAdvanceNotice", () => {
 
   it("dismiss() actually removes the banner — dismissedShas filter is applied in the notice memo", async () => {
     const { result } = renderHook(() => useMergeAdvanceNotice({ projectId: "p1-dismiss" }));
-    await waitFor(() => expect(result.current.notice).not.toBeNull());
+    await waitFor(() => expect(result.current.notice).toBeDefined());
     expect(result.current.notice?.toSha).toBe("abcdef123456");
     act(() => result.current.dismiss());
     await waitFor(() => expect(result.current.notice).toBeUndefined());
@@ -186,7 +186,7 @@ describe("useMergeAdvanceNotice", () => {
       return { ok: true };
     });
     const { result } = renderHook(() => useMergeAdvanceNotice({ projectId: "p1-auto-conflict" }));
-    await waitFor(() => expect(result.current.notice).not.toBeNull());
+    await waitFor(() => expect(result.current.notice).toBeDefined());
     expect(result.current.notice?.toSha).toBe("auto-conflict-1");
   });
 
@@ -207,7 +207,7 @@ describe("useMergeAdvanceNotice", () => {
       return { ok: true };
     });
     const { result } = renderHook(() => useMergeAdvanceNotice({ projectId: "p1-mixed" }));
-    await waitFor(() => expect(result.current.notice).not.toBeNull());
+    await waitFor(() => expect(result.current.notice).toBeDefined());
   });
 
   it("pull stash-conflict opens conflict state and preserves error visibility", async () => {
@@ -231,7 +231,7 @@ describe("useMergeAdvanceNotice", () => {
       return pushStatus;
     });
     const { result } = renderHook(() => useMergeAdvanceNotice({ projectId: "p1-pull-conflict" }));
-    await waitFor(() => expect(result.current.notice).not.toBeNull());
+    await waitFor(() => expect(result.current.notice).toBeDefined());
     await act(async () => { await result.current.pull(); });
     await waitFor(() => expect(result.current.conflictState).not.toBeNull());
     expect(result.current.conflictState).toEqual({

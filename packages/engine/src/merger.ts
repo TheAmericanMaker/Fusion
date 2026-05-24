@@ -567,8 +567,8 @@ async function syncDependenciesForMerge(
   }
 
   throwIfAborted(signal, taskId);
-  mergerLog.log(`${taskId}: syncing dependencies before merge build verification`);
-  await store.logEntry(taskId, `Syncing dependencies before merge build verification: ${installCommand}`);
+  mergerLog.log(`${taskId}: syncing dependencies before merge verification`);
+  await store.logEntry(taskId, `Syncing dependencies before merge verification: ${installCommand}`);
   try {
     await execAsync(installCommand, {
       cwd: rootDir,
@@ -1044,7 +1044,7 @@ export function packageNamesForFiles(rootDir: string, files: string[]): string[]
  *
  * @internal Exported for testing only.
  */
-export function deriveScopedPnpmTestCommand(rootDir: string, baseBranch: string, _branch: string): string | null {
+export function deriveScopedPnpmTestCommand(rootDir: string, baseBranch: string, branch: string): string | null {
   // 1. Read and parse pnpm-workspace.yaml
   const workspacePath = join(rootDir, "pnpm-workspace.yaml");
   let workspaceContent: string;
@@ -1060,11 +1060,11 @@ export function deriveScopedPnpmTestCommand(rootDir: string, baseBranch: string,
   const packageRoots = resolveWorkspacePackageRoots(rootDir, globs);
   if (packageRoots.length === 0) return null;
 
-  // 3. Get the changed files between base and branch tip
+  // 3. Get the changed files between base and the branch tip passed by caller.
   let changedFilesOutput: string;
   try {
     changedFilesOutput = execSync(
-      `git diff --name-only ${quoteArg(baseBranch)}...HEAD`,
+      `git diff --name-only ${quoteArg(baseBranch)}...${quoteArg(branch)}`,
       { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
     ).toString();
   } catch {
@@ -8131,6 +8131,7 @@ export async function aiMergeTask(
     }
 
     if (classification.kind === "owned-commit") {
+      const mergedAt = new Date().toISOString();
       await store.updateTask(taskId, {
         mergeDetails: {
           commitSha: classification.commit.sha,
@@ -8138,16 +8139,27 @@ export async function aiMergeTask(
           insertions: classification.commit.insertions,
           deletions: classification.commit.deletions,
           mergeCommitMessage: classification.commit.subject,
-          mergedAt: new Date().toISOString(),
+          mergedAt,
           mergeConfirmed: true,
           prNumber: task.prInfo?.number,
           mergeTargetBranch: mergeTarget.branch,
           mergeTargetSource: mergeTarget.source,
         },
       });
+      result.merged = true;
+      result.mergeConfirmed = true;
+      result.commitSha = classification.commit.sha;
+      result.filesChanged = classification.commit.filesChanged;
+      result.insertions = classification.commit.insertions;
+      result.deletions = classification.commit.deletions;
+      result.mergeCommitMessage = classification.commit.subject;
+      result.mergedAt = mergedAt;
+      result.mergeTargetBranch = mergeTarget.branch;
+      result.mergeTargetSource = mergeTarget.source;
       mergerLog.log(`${taskId}: branch missing; recovered owned landed commit ${classification.commit.sha.slice(0, 8)}`);
     } else {
       const noOpReason = `branch has zero commits ahead of ${classification.baseRef}`;
+      const mergedAt = new Date().toISOString();
       await store.updateTask(taskId, {
         modifiedFiles: [],
         mergeDetails: {
@@ -8156,17 +8168,25 @@ export async function aiMergeTask(
           noOpMerge: true,
           noOpReason,
           landedFiles: [],
-          mergedAt: new Date().toISOString(),
+          mergedAt,
           prNumber: task.prInfo?.number,
           mergeTargetBranch: classification.baseRef,
           mergeTargetSource: mergeTarget.source,
         },
       });
+      result.merged = true;
+      result.mergeConfirmed = true;
+      result.noOp = true;
+      result.noOpMerge = true;
+      result.noOpReason = noOpReason;
+      result.mergedAt = mergedAt;
+      result.mergeTargetBranch = classification.baseRef;
+      result.mergeTargetSource = mergeTarget.source;
       await store.logEntry(taskId, `Auto-finalized no-op (proven): start point on ${classification.baseRef}; modifiedFiles cleared`);
     }
 
     // Audit trail: record merge completion (FN-1404)
-    await audit.database({ type: "task:move", target: taskId, metadata: { to: "done", merged: false } });
+    await audit.database({ type: "task:move", target: taskId, metadata: { to: "done", merged: true } });
     await completeTask(store, taskId, result);
     return result;
   }
@@ -10615,7 +10635,7 @@ export async function executeMergeAttempt(
       }
     }
 
-    if (buildCommand) {
+    if (testCommand || buildCommand) {
       throwIfAborted(options.signal, taskId);
       const stagedFiles = await getStagedFiles(rootDir);
       if (shouldSyncDependenciesForMerge(stagedFiles, hasInstallState(rootDir))) {
@@ -11570,7 +11590,7 @@ async function runPostMergeWorkflowSteps(
 
     try {
       const result = stepMode === "script"
-        ? await executePostMergeScriptStep(store, taskId, ws, cwd, settings, auditor)
+        ? await executePostMergeScriptStep(store, taskId, ws, cwd, settings, auditor, mergeOptions.signal)
         : await executePostMergePromptStep(store, taskId, ws, rootDir, cwd, settings, mergeOptions);
       const completedAt = new Date().toISOString();
 
@@ -11632,6 +11652,7 @@ async function executePostMergeScriptStep(
   cwd: string,
   settings: Settings,
   auditor?: RunAuditor,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const scriptName = workflowStep.scriptName!.trim();
   const scripts = settings.scripts || {};
@@ -11647,6 +11668,7 @@ async function executePostMergeScriptStep(
     encoding: "utf-8",
     timeoutMs: 120_000,
     maxBuffer: 10 * 1024 * 1024,
+    ...(signal !== undefined && { signal }),
   });
 
   if (result.exitCode === 0 && !result.signal && !result.timedOut && !result.bufferExceeded && !result.spawnError) {
@@ -11674,8 +11696,9 @@ export async function __executePostMergeScriptStepForTests(
   cwd: string,
   settings: Settings,
   auditor?: RunAuditor,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
-  return executePostMergeScriptStep(store, taskId, workflowStep, cwd, settings, auditor);
+  return executePostMergeScriptStep(store, taskId, workflowStep, cwd, settings, auditor, signal);
 }
 
 /** Execute a prompt-mode post-merge workflow step using an AI agent in the provided execution directory. */
